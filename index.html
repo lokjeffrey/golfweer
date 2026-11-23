@@ -3,268 +3,228 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>7-Daagse Golfweer Planner — Clubhuis Tee-Time Radar</title>
+  <title>Golfweer Planner</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body class="min-h-screen pb-12">
+<body class="min-h-screen pb-14">
 
   <!-- Clubhuis Header -->
-  <header class="fairway-stripes text-white border-b-4 border-[#c5a059] shadow-md">
-    <div class="max-w-4xl mx-auto px-4 py-5">
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div class="flex items-center gap-3.5">
-          <div class="w-12 h-12 rounded-xl bg-[#22543d] border border-[#c5a059]/60 flex items-center justify-center shadow-inner shrink-0">
-            <svg class="w-6 h-6 text-[#c5a059]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M5 21V4l11 4-11 4" stroke-linecap="round" stroke-linejoin="round"/>
-              <ellipse cx="5" cy="21" rx="3" ry="1" />
+  <header class="clubhouse-surface text-white border-b-2 border-[#b89652]">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 py-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-white/5 border border-[#b89652]/55 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-[#e2c891]" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M6 20V4l10 3.5L6 11" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 20h4" stroke-linecap="round"/>
             </svg>
           </div>
           <div>
-            <h1 class="font-serif-club text-2xl sm:text-3xl font-bold tracking-tight text-white">7-Daagse Golfweer Planner</h1>
-            <div class="flex flex-wrap items-center gap-2 mt-1">
-              <span class="inline-block text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 rounded bg-[#22543d] text-[#e7cf9b] border border-[#c5a059]/40">
-                Clubhuis Tee-Time Radar
-              </span>
-              <span class="text-xs text-emerald-100/80">Dynamische starttijden • Schemerlicht • Banen-Scorecard</span>
-            </div>
+            <h1 class="font-serif-club text-xl sm:text-2xl font-semibold tracking-tight text-white leading-tight">Golfweer Planner</h1>
+            <p class="text-[11px] text-[#e2c891]/90 mt-0.5">Clubhuis Tee-Time Radar</p>
           </div>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-          <button id="btnOpenShare" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1b6b45] hover:bg-[#238255] text-white text-xs font-semibold border border-emerald-400/30 shadow-sm transition">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <rect x="3" y="3" width="18" height="18" rx="3"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/>
-              <path d="M21 15l-5-5L5 21"/>
+          <button type="button" id="btnOpenShare" class="header-ghost-btn inline-flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-[#e2c891]" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7M16 6l-4-4-4 4M12 2v13"/>
             </svg>
-            Deel weekkaart
+            <span>Deel</span>
           </button>
-          <button id="btnOpenAddCourse" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#22543d] hover:bg-[#2b664b] text-white text-xs font-semibold border border-white/15 transition">
-            <span>+ Eigen baan</span>
+          <button type="button" id="btnOpenAddCourse" class="header-ghost-btn">
+            + Baan
           </button>
-          <button id="btnRefresh" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#c5a059] hover:bg-[#d2af68] text-[#163828] text-xs font-bold shadow-sm transition">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <button type="button" id="btnRefresh" class="header-ghost-btn inline-flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-[#e2c891]" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
             </svg>
-            Verversen
+            <span>Verversen</span>
           </button>
         </div>
       </div>
     </div>
   </header>
 
-  <main class="max-w-4xl mx-auto px-4 pt-5 space-y-5">
+  <main class="max-w-4xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
 
-    <!-- Besturingspaneel -->
-    <section class="bg-white rounded-2xl border border-[#e5dfd1] shadow-sm p-4 sm:p-5 space-y-4">
-      <!-- Baankeuze + Weergave toggle -->
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-        <div class="md:col-span-5">
-          <label for="courseSelect" class="block text-[11px] font-bold uppercase tracking-wider text-stone-500 mb-1">Geselecteerde Golfbaan</label>
-          <select id="courseSelect" class="w-full rounded-xl border border-[#d6cfc0] bg-[#fbfaf6] px-3.5 py-2.5 text-sm font-semibold text-[#163828] focus:outline-none focus:ring-2 focus:ring-[#163828]">
-          </select>
-          <p id="courseMeta" class="text-xs text-stone-500 mt-1.5"></p>
-        </div>
-
-        <div class="md:col-span-7">
-          <span id="viewTablistLabel" class="block text-[11px] font-bold uppercase tracking-wider text-stone-500 mb-1">Weergave</span>
-          <div class="club-tablist no-scrollbar rounded-xl bg-[#f2efe7] p-1 border border-[#e5dfd1]" role="tablist" focusgroup="tablist nomemory" aria-labelledby="viewTablistLabel">
-            <button type="button" role="tab" id="tabSingleView" aria-selected="true" focusgroupstart class="club-tab">
-              Gekozen baan
-            </button>
-            <button type="button" role="tab" id="tabCompareView" aria-selected="false" tabindex="-1" class="club-tab">
-              Banen Matrix
-            </button>
-            <button type="button" role="tab" id="tabPlannerView" aria-selected="false" tabindex="-1" class="club-tab inline-flex items-center justify-center gap-1.5">
-              <span>Swingersclub</span>
-              <span id="plannerBadgeCount" class="hidden font-mono-score text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#c5a059] text-[#163828]"></span>
-            </button>
-          </div>
-        </div>
+    <!-- Primaire Navigatie (Tabs) -->
+    <nav aria-label="Weergaven">
+      <span id="viewTablistLabel" class="visually-hidden">Weergave</span>
+      <div class="club-tablist no-scrollbar" role="tablist" focusgroup="tablist nomemory" aria-labelledby="viewTablistLabel">
+        <button type="button" role="tab" id="tabSingleView" aria-selected="true" focusgroupstart class="club-tab">
+          Gekozen baan
+        </button>
+        <button type="button" role="tab" id="tabCompareView" aria-selected="false" tabindex="-1" class="club-tab">
+          Banen matrix
+        </button>
+        <button type="button" role="tab" id="tabPlannerView" aria-selected="false" tabindex="-1" class="club-tab inline-flex items-center gap-2">
+          <span>Swingersclub</span>
+          <span id="plannerBadgeCount" class="hidden font-mono-score text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-[#f6efdf] text-[#6d5120] border border-[#dec68e]"></span>
+        </button>
       </div>
+    </nav>
 
-      <!-- Ronde-indeling + Weersvoorkeur -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-[#efeae0]">
-        <div>
-          <span class="block text-[11px] font-bold uppercase tracking-wider text-stone-500 mb-1.5">Ronde-indeling</span>
-          <div class="grid grid-cols-2 gap-2 rounded-xl bg-[#f2efe7] p-1 border border-[#e5dfd1]">
-            <button id="btn9Holes" class="py-2 px-3 rounded-lg text-left bg-[#163828] text-white shadow-sm transition">
-              <div class="text-xs font-bold">9 Holes</div>
-              <div class="text-[11px] opacity-80 font-mono-score">2,0 uur (120 min)</div>
-            </button>
-            <button id="btn18Holes" class="py-2 px-3 rounded-lg text-left text-stone-700 hover:bg-white/60 transition">
-              <div class="text-xs font-bold">18 Holes</div>
-              <div class="text-[11px] text-stone-500 font-mono-score">4,0 uur (240 min)</div>
-            </button>
-          </div>
+    <!-- Compacte Filterbalk -->
+    <section aria-label="Baan- en ronde-instellingen" class="bg-white rounded-xl border border-[#e6e3db] px-4 py-3.5">
+      <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div class="flex-1 min-w-0">
+          <label for="courseSelect" class="visually-hidden">Golfbaan</label>
+          <select id="courseSelect" class="w-full rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm font-medium text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]">
+          </select>
+          <p id="courseMeta" class="text-xs text-[#66706a] mt-1.5"></p>
         </div>
 
-        <div>
-          <div class="flex items-center justify-between mb-1.5">
-            <span class="text-[11px] font-bold uppercase tracking-wider text-stone-500">Weersvoorkeur Golfer</span>
-            <span id="prefBadge" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#163828] text-white">Normaal</span>
+        <div class="flex flex-wrap items-center gap-3 shrink-0">
+          <div class="seg-group" role="group" aria-label="Ronde-indeling">
+            <button type="button" id="btn9Holes" aria-pressed="true" class="seg-btn">9 holes</button>
+            <button type="button" id="btn18Holes" aria-pressed="false" class="seg-btn">18 holes</button>
           </div>
-          <div class="bg-[#fbfaf6] border border-[#e5dfd1] rounded-xl px-3.5 py-2.5">
-            <input id="prefSlider" type="range" min="0" max="2" step="1" value="1" class="w-full club-slider" />
-            <div class="grid grid-cols-3 text-[11px] font-semibold text-stone-600 mt-1.5 select-none">
-              <button type="button" data-pref="0" class="text-left hover:text-[#163828]">Bikkel</button>
-              <button type="button" data-pref="1" class="text-center hover:text-[#163828]">Normaal</button>
-              <button type="button" data-pref="2" class="text-right hover:text-[#163828]">Mooiweer-golfer</button>
-            </div>
+
+          <div class="seg-group" role="group" aria-label="Weersvoorkeur">
+            <button type="button" data-pref="0" aria-pressed="false" class="seg-btn">Bikkel</button>
+            <button type="button" data-pref="1" aria-pressed="true" class="seg-btn">Normaal</button>
+            <button type="button" data-pref="2" aria-pressed="false" class="seg-btn">Mooiweer</button>
           </div>
         </div>
       </div>
     </section>
 
     <!-- Foutmelding Container -->
-    <div id="errorBox" class="hidden bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center justify-between gap-4">
-      <div class="text-xs text-rose-900">
-        <p class="font-bold text-sm mb-0.5">Er trad een fout op bij het laden van de golfweer-data</p>
-        <p id="errorText" class="text-rose-700"></p>
+    <div id="errorBox" role="alert" class="hidden bg-[#faf4f4] border border-[#dfc5c7] rounded-xl p-4 flex items-center justify-between gap-4">
+      <div class="text-xs text-[#592629]">
+        <p class="font-semibold text-sm mb-0.5">Kon weerdata niet laden</p>
+        <p id="errorText" class="text-[#72363a]"></p>
       </div>
-      <button id="btnRetry" class="shrink-0 px-3.5 py-2 rounded-xl bg-rose-800 text-white text-xs font-bold hover:bg-rose-900">
-        Opnieuw laden
+      <button type="button" id="btnRetry" class="shrink-0 px-3.5 py-2 rounded-lg bg-[#1b3a2d] text-white text-xs font-medium hover:bg-[#244b3a]">
+        Opnieuw
       </button>
     </div>
 
     <!-- Laadindicator -->
-    <div id="loadingBox" class="bg-white rounded-2xl border border-[#e5dfd1] p-8 text-center">
-      <div class="inline-block w-7 h-7 border-4 border-[#163828] border-t-[#c5a059] rounded-full animate-spin mb-2"></div>
-      <p class="text-sm font-semibold text-[#163828]">Live uurlijkse baancondities ophalen via Open-Meteo...</p>
+    <div id="loadingBox" class="bg-white rounded-xl border border-[#e6e3db] p-8 text-center">
+      <div class="inline-block w-6 h-6 border-2 border-[#e6e3db] border-t-[#1b3a2d] rounded-full animate-spin mb-2" aria-hidden="true"></div>
+      <p class="text-sm font-medium text-[#535d57]">Weerdata laden...</p>
     </div>
 
-    <!-- Tab Panels Container (geen gap tussen hidden="until-found" panels) -->
+    <!-- Tab Panels Container -->
     <div class="tabpanels-stack">
 
       <!-- Tab 1: Enkele Baan Weergave -->
       <div id="singleCourseContainer" role="tabpanel" aria-labelledby="tabSingleView" class="hidden">
         <div class="space-y-4">
           <!-- Sticky Snel 7-Daags Overzicht -->
-          <div class="sticky top-2 z-20 bg-[#f7f5ef]/95 backdrop-blur-sm py-1">
+          <div class="sticky top-0 z-20 bg-[#f5f3ec]/95 backdrop-blur-sm py-2">
             <div id="quickDayStrip" class="grid grid-cols-7 gap-1.5 overflow-x-auto no-scrollbar"></div>
           </div>
 
-          <!-- Clubhuis Aanrader Banner -->
-          <section id="bestWeekBanner" class="fairway-stripes rounded-2xl p-4 sm:p-5 text-white border border-[#c5a059]/60 shadow-sm"></section>
+          <!-- Beste Speeldag Samenvatting -->
+          <section id="bestWeekBanner" class="clubhouse-surface rounded-xl border border-[#b89652]/45 px-5 py-4 text-white"></section>
 
           <!-- 7 Dagkaarten -->
-          <section id="daysList" class="space-y-3"></section>
+          <section id="daysList" class="space-y-2.5"></section>
         </div>
       </div>
 
       <!-- Tab 2: Banen Vergelijkingsmatrix -->
       <div id="compareCoursesContainer" role="tabpanel" aria-labelledby="tabCompareView" hidden="until-found">
-        <div class="space-y-4">
-          <section class="bg-white rounded-2xl border border-[#e5dfd1] shadow-sm p-4 sm:p-5">
-            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <div>
-                <h2 class="font-serif-club text-xl font-bold text-[#163828]">Banen Vergelijkingsmatrix</h2>
-                <p class="text-xs text-stone-500">Hoogste speelbaarheidsscore per dag &amp; baan (tik op een cel om die baan &amp; dag te openen)</p>
+        <section class="bg-white rounded-xl border border-[#e6e3db] border-t-2 border-t-[#163828] p-5 space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="font-serif-club text-lg font-semibold text-[#18241e]">Banen vergelijken</h2>
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#66706a] mt-0.5">
+                <span>Tik op een score om die dag te openen</span>
+                <span class="text-[#cfc9bc]" aria-hidden="true">·</span>
+                <span class="inline-flex items-center gap-2.5 text-[11px]">
+                  <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#1b5e3d]" aria-hidden="true"></span>Topdag</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#5c7344]" aria-hidden="true"></span>Goed</span>
+                  <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#8c6a32]" aria-hidden="true"></span>Matig</span>
+                </span>
               </div>
-              <button id="btnShareMatrix" class="px-3.5 py-2 rounded-xl bg-[#163828] text-white text-xs font-bold hover:bg-[#22543d]">
-                Deel visuele matrix
-              </button>
             </div>
-            <!-- Subtiele kleurschaal-legenda -->
-            <div class="flex items-center gap-2 mb-3 text-[10px] font-semibold text-stone-500">
-              <span>Slecht</span>
-              <div class="h-2 flex-1 max-w-xs rounded-full" style="background: linear-gradient(90deg, #9f1239 0%, #c2571a 35%, #b47418 55%, #6d8326 70%, #2b7a4b 85%, #14643c 100%);"></div>
-              <span>Topdag</span>
-            </div>
-            <div class="overflow-x-auto">
-              <table id="compareTable" class="w-full text-left border-collapse text-xs"></table>
-            </div>
-          </section>
-        </div>
+            <button type="button" id="btnShareMatrix" class="quiet-btn">
+              Deel matrix
+            </button>
+          </div>
+          <div class="overflow-x-auto rounded-lg border border-[#e6e3db]">
+            <table id="compareTable" class="w-full text-left border-collapse text-xs"></table>
+          </div>
+        </section>
       </div>
 
       <!-- Tab 3: Swingersclub E.v. — Beschikbaarheid & Tee Times -->
       <div id="plannerContainer" role="tabpanel" aria-labelledby="tabPlannerView" hidden="until-found">
-        <div class="space-y-4">
+        <div class="space-y-5">
 
           <!-- Swingersclub Header & Besturing -->
-          <section class="bg-white rounded-2xl border border-[#e5dfd1] shadow-sm p-4 sm:p-5 space-y-4">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <h2 class="font-serif-club text-xl font-bold text-[#163828]">Swingersclub E.v. — Tee-Time Planner</h2>
-                  <span id="plannerSyncPill" class="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#f2efe7] text-stone-700 border border-[#e5dfd1]">
-                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                    Lokaal opgeslagen
-                  </span>
-                </div>
-                <p class="text-xs text-stone-500 mt-0.5">
-                  Vul per dag de beschikbaarheid van <strong>Tom 🦩</strong>, <strong>Jeff</strong> en <strong>Ed</strong> in — overlap, booker-rotatie en golfweer worden automatisch berekend.
-                </p>
+          <section class="bg-white rounded-xl border border-[#e6e3db] p-4 sm:p-5 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2.5">
+                <h2 class="font-serif-club text-lg font-semibold text-[#18241e]">Swingersclub E.v.</h2>
+                <span id="plannerSyncPill" class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-[#f2f0ea] text-[#535d57] border border-[#e6e3db]">
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#8f723d]" aria-hidden="true"></span>
+                  Lokaal
+                </span>
               </div>
 
               <div class="flex flex-wrap items-center gap-2">
-                <button type="button" id="btnPlannerShareWA" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1b6b45] hover:bg-[#163828] text-white text-xs font-bold shadow-sm transition">
-                  <span>Deel via WhatsApp</span>
+                <button type="button" id="btnPlannerShareWA" class="quiet-btn">
+                  Deel
                 </button>
-                <button type="button" id="btnOpenSheetSync" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#fbfaf6] hover:bg-[#f2efe7] text-[#163828] text-xs font-bold border border-[#d6cfc0] transition">
-                  <span>Google Sheet koppelen</span>
+                <button type="button" id="btnOpenSheetSync" class="quiet-btn">
+                  Google Sheet
                 </button>
-                <button type="button" id="btnPlannerSyncNow" class="hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#c5a059] hover:bg-[#d2af68] text-[#163828] text-xs font-bold transition">
-                  <span>Sync Sheet</span>
+                <button type="button" id="btnPlannerSyncNow" class="hidden quiet-btn">
+                  Sync
                 </button>
               </div>
             </div>
 
-            <!-- Statusmelding banner (bijv. WhatsApp gekopieerd / Sheet gesynchroniseerd) -->
-            <div id="plannerStatusBanner" class="hidden text-xs font-medium rounded-xl px-3.5 py-2.5 border"></div>
+            <!-- Statusmelding banner -->
+            <div id="plannerStatusBanner" class="hidden text-xs font-medium rounded-lg px-3.5 py-2.5 border"></div>
 
-            <!-- Boek-teller (Eerlijke rotatie) + Actieve speler + Filter -->
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 pt-3 border-t border-[#efeae0] items-center">
-              <!-- Eerlijke Booker-rotatie teller -->
-              <div class="md:col-span-5 bg-[#fbfaf6] rounded-xl border border-[#e5dfd1] p-2.5">
-                <div class="text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1.5">Eerlijke Booker-rotatie (bevestigd)</div>
-                <div id="bookerCreditsBar" class="flex flex-wrap items-center gap-2 text-xs"></div>
-              </div>
+            <!-- Boek-teller + Actieve speler + Filter -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t border-[#e6e3db]">
+              <div id="bookerCreditsBar" class="flex flex-wrap items-center gap-1.5 text-xs"></div>
 
-              <!-- Wie ben jij? (markeert jouw kolom) -->
-              <div class="md:col-span-4">
-                <span class="block text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1">Markeer mijn kolom</span>
-                <div id="activeMemberPicker" class="grid grid-cols-4 gap-1 rounded-xl bg-[#f2efe7] p-1 border border-[#e5dfd1] text-[11px]">
-                  <button type="button" data-member="all" class="py-1.5 px-1 rounded-lg font-bold bg-[#163828] text-white transition">Alle</button>
-                  <button type="button" data-member="tom" class="py-1.5 px-1 rounded-lg font-semibold text-stone-700 hover:text-[#163828] transition">Tom 🦩</button>
-                  <button type="button" data-member="jeff" class="py-1.5 px-1 rounded-lg font-semibold text-stone-700 hover:text-[#163828] transition">Jeff</button>
-                  <button type="button" data-member="ed" class="py-1.5 px-1 rounded-lg font-semibold text-stone-700 hover:text-[#163828] transition">Ed</button>
+              <div class="flex flex-wrap items-center gap-2.5">
+                <div id="activeMemberPicker" class="seg-group" role="group" aria-label="Markeer mijn kolom">
+                  <button type="button" data-member="all" aria-pressed="true" class="seg-btn">Alle</button>
+                  <button type="button" data-member="tom" aria-pressed="false" class="seg-btn">Tom 🦩</button>
+                  <button type="button" data-member="jeff" aria-pressed="false" class="seg-btn">Jeff</button>
+                  <button type="button" data-member="ed" aria-pressed="false" class="seg-btn">Ed</button>
                 </div>
-              </div>
 
-              <!-- Dagfilter -->
-              <div class="md:col-span-3">
-                <label for="plannerFilterSelect" class="block text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1">Filter dagen</label>
-                <select id="plannerFilterSelect" class="w-full rounded-xl border border-[#d6cfc0] bg-[#fbfaf6] px-2.5 py-2 text-xs font-semibold text-[#163828]">
-                  <option value="all">Alle dagen</option>
-                  <option value="go">Alleen GO / GOGOGO</option>
-                  <option value="week7">Komende 7 dagen (live weer)</option>
-                  <option value="confirmed">Alleen bevestigd</option>
-                </select>
+                <div>
+                  <label for="plannerFilterSelect" class="visually-hidden">Filter dagen</label>
+                  <select id="plannerFilterSelect" class="rounded-lg border border-[#8c867b] bg-[#faf9f5] px-2.5 py-1.5 text-xs font-medium text-[#18241e] min-h-[2.125rem] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]">
+                    <option value="all">Alle dagen</option>
+                    <option value="go">Alleen GO / GOGOGO</option>
+                    <option value="week7">Komende 7 dagen</option>
+                    <option value="confirmed">Bevestigd</option>
+                  </select>
+                </div>
               </div>
             </div>
           </section>
 
           <!-- Kansrijke Tee Times / Komende Mogelijkheden -->
-          <section id="plannerHighlights" class="fairway-stripes rounded-2xl p-4 sm:p-5 text-white border border-[#c5a059]/60 shadow-sm space-y-3"></section>
+          <section id="plannerHighlights" class="space-y-2.5"></section>
 
-          <!-- Beschikbaarheidstabel (Responsive met sticky headers + container-query cards) -->
-          <section class="bg-white rounded-2xl border border-[#e5dfd1] shadow-sm p-3 sm:p-4 space-y-3">
+          <!-- Beschikbaarheidstabel -->
+          <section class="bg-white rounded-xl border border-[#e6e3db] p-4 sm:p-5 space-y-3.5">
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 class="font-serif-club text-base font-bold text-[#163828]">Beschikbaarheidsoverzicht</h3>
-                <p id="plannerCourseWeatherHint" class="text-[11px] text-stone-500">Tik op een cel om beschikbaarheid of bevestigde tee time aan te passen.</p>
+              <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+                <h3 class="font-serif-club text-base font-semibold text-[#18241e]">Overzicht</h3>
+                <p id="plannerCourseWeatherHint" class="text-xs text-[#66706a]"></p>
               </div>
-              <div class="flex items-center gap-2">
-                <button type="button" id="btnPlannerAddWeek" class="px-3 py-1.5 rounded-lg bg-[#f2efe7] hover:bg-[#e5dfd1] text-[#163828] text-xs font-bold border border-[#d6cfc0] transition">
-                  + Extra week
-                </button>
-              </div>
+              <button type="button" id="btnPlannerAddWeek" class="quiet-btn">
+                + Week
+              </button>
             </div>
 
             <div tabindex="0" role="region" aria-labelledby="planner-table-caption" class="planner-table-wrapper">
@@ -272,27 +232,18 @@
                 <caption id="planner-table-caption" class="visually-hidden">Swingersclub beschikbaarheid van Tom, Jeff en Ed met berekende tee times, golfweer, booker en bevestigingen</caption>
                 <thead>
                   <tr>
-                    <th scope="col">Dag &amp; Datum</th>
+                    <th scope="col">Dag</th>
                     <th scope="col">Tom 🦩</th>
                     <th scope="col">Jeff</th>
                     <th scope="col">Ed</th>
-                    <th scope="col">Potentieel</th>
-                    <th scope="col">Tee time &amp; Weer</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Tijd &amp; weer</th>
                     <th scope="col">Booker</th>
-                    <th scope="col">Confirmed</th>
+                    <th scope="col">Bevestigd</th>
                   </tr>
                 </thead>
                 <tbody id="plannerTableBody"></tbody>
               </table>
-            </div>
-
-            <!-- Compacte legenda -->
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-stone-500 pt-1">
-              <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-[#dcfce7] border border-[#86efac]"></span> Hele dag / overdag</span>
-              <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-[#fef3c7] border border-[#fcd34d]"></span> Deel van de dag (va/tot/tussen)</span>
-              <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-[#e0f2fe] border border-[#7dd3fc]"></span> Misschien</span>
-              <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-[#f3e8ff] border border-[#d8b4fe]"></span> Driving Range (DR — geen tee time)</span>
-              <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-[#fee2e2] border border-[#fca5a5]"></span> Kan niet (x)</span>
             </div>
           </section>
 
@@ -300,111 +251,112 @@
       </div>
 
     </div>
-
-    <!-- Uitleg Accordeon -->
-    <details class="bg-white rounded-2xl border border-[#e5dfd1] p-4 text-xs text-stone-600">
-      <summary class="font-bold text-[#163828] cursor-pointer select-none">
-        Hoe werken de score, kwadratische regenkans, schemerlicht &amp; dynamische starttijd?
-      </summary>
-      <div class="mt-3 space-y-2 leading-relaxed border-t border-[#efeae0] pt-3">
-        <p><strong>1. Kwadratische regenkans &amp; baanconditie:</strong> Kleine buienkansen (&le; 10% = 0 pt, 20% &approx; 0,5 pt) kosten nauwelijks punten, terwijl hoge regenkansen (50–95%) kwadratisch zwaarder doorwegen. Ook neerslag in de 3 uur vóór je starttijd geeft een lichte aftrek voor natte greens en bunkers.</p>
-        <p><strong>2. Baan-windfactor:</strong> Bosbanen zoals <em>Amelisweerd</em> (0.80x) en <em>Kromme Rijn</em> (0.85x) geven luwte; open polderbanen zoals <em>Wilnis</em> en <em>De Kroonprins</em> (1.15x) vangen meer wind.</p>
-        <p><strong>3. Schemerlicht &amp; dynamische starttijd-marge:</strong> Bij droog en lichtbewolkt weer rekent de tool +15 min burgerlijke schemering na zonsondergang mee (<em>Licht tot HH:MM</em>). Vervolgens verzamelt hij alle starttijden binnen <strong>5 punten van de dagpiek</strong>: breed bij stabiel weer, scherp tussen buien door.</p>
-        <p><strong>4. Score-uitleg per dag:</strong> Op iedere dagkaart toont de samenvatting direct welke factoren (regen, wind, natte baan of temperatuur) tijdens het beste speelvenster de meeste punten kosten — of bevestigt dat het droog, rustig en aangenaam is.</p>
-      </div>
-    </details>
   </main>
 
-  <!-- Modal: Eigen Baan Toevoegen -->
-  <div id="addCourseModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-md w-full border border-[#e5dfd1] shadow-xl overflow-hidden">
-      <div class="fairway-stripes px-5 py-4 text-white flex items-center justify-between border-b-2 border-[#c5a059]">
-        <h3 class="font-serif-club text-lg font-bold">Eigen golfbaan toevoegen</h3>
-        <button id="btnCloseAddCourse" class="text-white/80 hover:text-white text-xl leading-none">&times;</button>
+  <!-- Discreet Uitleg Footer -->
+  <footer class="max-w-4xl mx-auto px-4 sm:px-6 pt-8">
+    <details class="footer-disclosure text-xs text-[#66706a]">
+      <summary class="inline-flex items-center gap-1.5 cursor-pointer select-none font-medium text-[#535d57] hover:text-[#18241e] py-1">
+        <span>Hoe wordt de score berekend?</span>
+      </summary>
+      <div class="mt-3 space-y-2 leading-relaxed border-t border-[#e6e3db] pt-3 prose-note text-[#535d57]">
+        <p><strong>Neerslag &amp; ondergrond:</strong> Lichte buienkansen wegen nauwelijks mee; hogere kansen en voorafgaande regen op greens tellen zwaarder.</p>
+        <p><strong>Windbeschutting:</strong> Bosbanen zoals Amelisweerd (0.80&times;) en Kromme Rijn (0.85&times;) geven luwte; open polderbanen vangen meer wind.</p>
+        <p><strong>Schemerlicht:</strong> Bij helder weer telt +15 minuten burgerlijke schemering mee na zonsondergang.</p>
+        <p><strong>Starttijd-marge:</strong> Alle starttijden binnen 5 punten van de dagpiek vormen samen het ideale venster.</p>
       </div>
-      <form id="addCourseForm" class="p-5 space-y-3 text-xs">
+    </details>
+  </footer>
+
+  <!-- Modal: Eigen Baan Toevoegen -->
+  <div id="addCourseModal" role="dialog" aria-modal="true" aria-labelledby="addCourseModalTitle" class="hidden fixed inset-0 z-50 bg-[#18241e]/40 backdrop-blur-[2px] items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-md w-full border border-[#e6e3db] border-t-[3px] border-t-[#163828] shadow-xl overflow-hidden">
+      <div class="bg-white px-5 py-4 border-b border-[#e6e3db] flex items-center justify-between">
+        <h2 id="addCourseModalTitle" class="font-serif-club text-lg font-semibold text-[#18241e]">Eigen golfbaan toevoegen</h2>
+        <button type="button" id="btnCloseAddCourse" aria-label="Sluiten" class="text-[#66706a] hover:text-[#18241e] text-xl leading-none px-1.5 py-0.5 rounded">&times;</button>
+      </div>
+      <form id="addCourseForm" class="p-5 space-y-3.5 text-xs">
         <div>
-          <label class="block font-bold text-stone-700 mb-1">Naam golfbaan</label>
-          <input id="newCourseName" type="text" required placeholder="bijv. Golfclub Anderstein" class="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm" />
+          <label for="newCourseName" class="block font-medium text-[#535d57] mb-1">Naam golfbaan</label>
+          <input id="newCourseName" type="text" required placeholder="bijv. Golfclub Anderstein" class="w-full rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]" />
         </div>
         <div>
-          <label class="block font-bold text-stone-700 mb-1">Plaats</label>
-          <input id="newCourseCity" type="text" required placeholder="bijv. Maarsbergen" class="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm" />
+          <label for="newCourseCity" class="block font-medium text-[#535d57] mb-1">Plaats</label>
+          <input id="newCourseCity" type="text" required placeholder="bijv. Maarsbergen" class="w-full rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]" />
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block font-bold text-stone-700 mb-1">Breedtegraad (Lat)</label>
-            <input id="newCourseLat" type="number" step="0.0001" required placeholder="52.0542" class="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm font-mono-score" />
+            <label for="newCourseLat" class="block font-medium text-[#535d57] mb-1">Breedtegraad (Lat)</label>
+            <input id="newCourseLat" type="number" step="0.0001" required placeholder="52.0542" class="w-full rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm font-mono-score text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]" />
           </div>
           <div>
-            <label class="block font-bold text-stone-700 mb-1">Lengtegraad (Lon)</label>
-            <input id="newCourseLon" type="number" step="0.0001" required placeholder="5.4119" class="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm font-mono-score" />
+            <label for="newCourseLon" class="block font-medium text-[#535d57] mb-1">Lengtegraad (Lon)</label>
+            <input id="newCourseLon" type="number" step="0.0001" required placeholder="5.4119" class="w-full rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm font-mono-score text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]" />
           </div>
         </div>
         <div>
-          <label class="block font-bold text-stone-700 mb-1">Baantype (windbeschutting)</label>
-          <select id="newCourseType" class="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm">
-            <option value="0.80">Bosbaan (veel luwte — 0.80x wind)</option>
-            <option value="0.90" selected>Parkbaan (gemiddelde luwte — 0.90x wind)</option>
-            <option value="1.15">Open polderbaan (volle wind — 1.15x wind)</option>
+          <label for="newCourseType" class="block font-medium text-[#535d57] mb-1">Baantype (windbeschutting)</label>
+          <select id="newCourseType" class="w-full rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]">
+            <option value="0.80">Bosbaan (veel luwte — 0.80x)</option>
+            <option value="0.90" selected>Parkbaan (gemiddelde luwte — 0.90x)</option>
+            <option value="1.15">Open polderbaan (volle wind — 1.15x)</option>
           </select>
         </div>
         <div class="pt-2 flex justify-end gap-2">
-          <button type="button" id="btnCancelAddCourse" class="px-4 py-2 rounded-xl border border-stone-300 font-semibold text-stone-600">Annuleren</button>
-          <button type="submit" class="px-4 py-2 rounded-xl bg-[#163828] text-white font-bold">Opslaan &amp; laden</button>
+          <button type="button" id="btnCancelAddCourse" class="quiet-btn">Annuleren</button>
+          <button type="submit" class="px-4 py-2 rounded-lg bg-[#1b3a2d] hover:bg-[#244b3a] text-white font-medium min-h-[2.25rem]">Opslaan</button>
         </div>
       </form>
     </div>
   </div>
 
   <!-- Modal: Visuele Scorecard Delen -->
-  <div id="shareModal" class="hidden fixed inset-0 z-50 bg-black/65 backdrop-blur-sm items-center justify-center p-3 sm:p-4">
-    <div class="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] flex flex-col border border-[#e5dfd1] shadow-2xl overflow-hidden">
-      <div class="fairway-stripes px-5 py-3.5 text-white flex items-center justify-between border-b-2 border-[#c5a059] shrink-0">
+  <div id="shareModal" role="dialog" aria-modal="true" aria-labelledby="shareModalTitle" class="hidden fixed inset-0 z-50 bg-[#18241e]/45 backdrop-blur-[2px] items-center justify-center p-3 sm:p-4">
+    <div class="bg-white rounded-xl max-w-lg w-full max-h-[92vh] flex flex-col border border-[#e6e3db] border-t-[3px] border-t-[#163828] shadow-xl overflow-hidden">
+      <div class="bg-white px-5 py-4 border-b border-[#e6e3db] flex items-center justify-between shrink-0">
         <div>
-          <h3 id="shareModalTitle" class="font-serif-club text-lg font-bold">Visueel Golfweerbericht</h3>
-          <p id="shareModalSub" class="text-[11px] text-emerald-100/85">2&times; Retina PNG Scorecard</p>
+          <h2 id="shareModalTitle" class="font-serif-club text-lg font-semibold text-[#18241e]">Scorecard delen</h2>
+          <p id="shareModalSub" class="text-xs text-[#66706a]">Afbeelding of tekstoverzicht</p>
         </div>
-        <button id="btnCloseShare" class="text-white/80 hover:text-white text-2xl leading-none">&times;</button>
+        <button type="button" id="btnCloseShare" aria-label="Sluiten" class="text-[#66706a] hover:text-[#18241e] text-xl leading-none px-1.5 py-0.5 rounded">&times;</button>
       </div>
 
-      <div class="p-4 overflow-y-auto space-y-3 flex-1">
+      <div class="p-4 overflow-y-auto space-y-3.5 flex-1">
         <!-- Kaarttype Tabs -->
-        <div class="grid grid-cols-3 gap-1.5 bg-[#f2efe7] p-1 rounded-xl border border-[#e5dfd1] text-xs">
-          <button data-sharemode="week" class="share-mode-btn py-1.5 px-2 rounded-lg font-bold bg-[#163828] text-white">7-Daags Week</button>
-          <button data-sharemode="day" class="share-mode-btn py-1.5 px-2 rounded-lg font-semibold text-stone-600">Dagkaart</button>
-          <button data-sharemode="matrix" class="share-mode-btn py-1.5 px-2 rounded-lg font-semibold text-stone-600">Alle banen</button>
+        <div class="grid grid-cols-3 gap-1 bg-[#f2f0ea] p-1 rounded-lg border border-[#e6e3db] text-xs">
+          <button type="button" data-sharemode="week" class="share-mode-btn py-1.5 px-2 rounded-md font-semibold bg-white text-[#18241e] shadow-sm">Weekoverzicht</button>
+          <button type="button" data-sharemode="day" class="share-mode-btn py-1.5 px-2 rounded-md font-medium text-[#535d57]">Dagkaart</button>
+          <button type="button" data-sharemode="matrix" class="share-mode-btn py-1.5 px-2 rounded-md font-medium text-[#535d57]">Alle banen</button>
         </div>
 
         <!-- Opties -->
-        <div class="flex flex-wrap gap-3 text-xs text-stone-700">
+        <div class="flex flex-wrap gap-4 text-xs text-[#535d57]">
           <label class="inline-flex items-center gap-1.5 cursor-pointer">
-            <input id="chkShareTips" type="checkbox" checked class="accent-[#163828] rounded" />
-            <span>Caddie- &amp; kledingtip</span>
+            <input id="chkShareTips" type="checkbox" checked class="accent-[#1b3a2d] rounded" />
+            <span>Kleding- &amp; caddietips</span>
           </label>
           <label class="inline-flex items-center gap-1.5 cursor-pointer">
-            <input id="chkShareAlts" type="checkbox" checked class="accent-[#163828] rounded" />
+            <input id="chkShareAlts" type="checkbox" checked class="accent-[#1b3a2d] rounded" />
             <span>Alternatieve baantips</span>
           </label>
         </div>
 
         <!-- PNG Preview -->
-        <div class="bg-[#ede8dc] rounded-xl p-2.5 border border-[#dcd4c2] flex flex-col items-center">
-          <img id="sharePreviewImg" alt="Golfweer Scorecard" class="w-full rounded-lg shadow-md border border-[#163828]/20" />
-          <p class="text-[10px] text-stone-500 mt-1.5">Tip: houd de afbeelding ingedrukt om direct te kopiëren of op te slaan</p>
+        <div class="bg-[#f6f5f0] rounded-lg p-2.5 border border-[#e6e3db] flex flex-col items-center">
+          <img id="sharePreviewImg" alt="Golfweer Scorecard" class="w-full rounded-md border border-[#e6e3db]" />
         </div>
 
-        <div id="shareStatusMsg" class="hidden text-xs font-medium bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-xl px-3 py-2"></div>
+        <div id="shareStatusMsg" class="hidden text-xs font-medium bg-[#f1f6f3] text-[#1b4332] border border-[#c7dcd0] rounded-lg px-3 py-2"></div>
       </div>
 
-      <div class="p-3.5 bg-[#faf8f2] border-t border-[#e5dfd1] grid grid-cols-2 gap-2 shrink-0">
-        <button id="btnShareNative" class="col-span-2 py-2.5 px-4 rounded-xl bg-[#1b6b45] hover:bg-[#163828] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition">
-          <span>Deel afbeelding (WhatsApp / Share)</span>
+      <div class="p-3.5 bg-[#faf9f5] border-t border-[#e6e3db] grid grid-cols-2 gap-2 shrink-0">
+        <button type="button" id="btnShareNative" class="col-span-2 py-2.5 px-4 rounded-lg bg-[#1b3a2d] hover:bg-[#244b3a] text-white font-medium text-xs transition min-h-[2.25rem]">
+          Deel afbeelding
         </button>
-        <button id="btnDownloadPng" class="py-2 px-3 rounded-xl bg-[#163828] text-white font-semibold text-xs hover:bg-[#22543d]">
+        <button type="button" id="btnDownloadPng" class="quiet-btn">
           Download PNG
         </button>
-        <button id="btnCopyText" class="py-2 px-3 rounded-xl border border-stone-300 bg-white text-stone-700 font-semibold text-xs hover:bg-stone-50">
+        <button type="button" id="btnCopyText" class="quiet-btn">
           Kopieer tekst
         </button>
       </div>
@@ -413,121 +365,138 @@
 
   <!-- Native Dialog: Beschikbaarheid / Confirmed bewerken -->
   <dialog id="availEditorDialog" class="club-dialog" closedby="any" aria-labelledby="availEditorTitle">
-    <div class="fairway-stripes px-5 py-3.5 text-white flex items-center justify-between border-b-2 border-[#c5a059] shrink-0">
+    <div class="bg-white px-5 py-4 border-b border-[#e6e3db] flex items-center justify-between shrink-0">
       <div>
-        <h2 id="availEditorTitle" class="font-serif-club text-lg font-bold">Beschikbaarheid aanpassen</h2>
-        <p id="availEditorSubtitle" class="text-[11px] text-emerald-100/85"></p>
+        <h2 id="availEditorTitle" class="font-serif-club text-lg font-semibold text-[#18241e]">Beschikbaarheid aanpassen</h2>
+        <p id="availEditorSubtitle" class="text-xs text-[#66706a] mt-0.5"></p>
       </div>
-      <button type="button" id="btnCloseAvailDialog" aria-label="Sluiten" class="text-white/80 hover:text-white text-2xl leading-none px-1">&times;</button>
+      <button type="button" id="btnCloseAvailDialog" aria-label="Sluiten" class="text-[#66706a] hover:text-[#18241e] text-xl leading-none px-1.5 py-0.5 rounded">&times;</button>
     </div>
 
     <form id="availEditorForm" class="p-4 sm:p-5 space-y-4 overflow-y-auto text-xs">
       <!-- Modus A: Speler beschikbaarheid -->
-      <div id="availMemberFields" class="space-y-3.5">
+      <div id="availMemberFields" class="space-y-4">
         <div>
-          <span class="block font-bold text-stone-600 uppercase tracking-wider text-[10px] mb-1.5">Snelle keuze</span>
+          <span class="block font-medium text-[#535d57] mb-1.5">Snelle keuze</span>
           <div class="grid grid-cols-3 gap-1.5">
-            <button type="button" data-quick-avail="hele dag" class="px-2.5 py-2 rounded-lg border border-[#86efac] bg-[#dcfce7] text-[#14532d] font-bold hover:opacity-90">Hele dag</button>
-            <button type="button" data-quick-avail="ochtend" class="px-2.5 py-2 rounded-lg border border-[#fcd34d] bg-[#fef3c7] text-[#78350f] font-bold hover:opacity-90">Ochtend</button>
-            <button type="button" data-quick-avail="middag" class="px-2.5 py-2 rounded-lg border border-[#fcd34d] bg-[#fef3c7] text-[#78350f] font-bold hover:opacity-90">Middag</button>
-            <button type="button" data-quick-avail="misschien" class="px-2.5 py-2 rounded-lg border border-[#7dd3fc] bg-[#e0f2fe] text-[#0c4a6e] font-bold hover:opacity-90">Misschien</button>
-            <button type="button" data-quick-avail="x" class="px-2.5 py-2 rounded-lg border border-[#fca5a5] bg-[#fee2e2] text-[#991b1b] font-bold hover:opacity-90">x (Kan niet)</button>
-            <button type="button" data-quick-avail="" class="px-2.5 py-2 rounded-lg border border-stone-300 bg-stone-50 text-stone-600 font-semibold hover:bg-stone-100">Leegmaken</button>
+            <button type="button" data-quick-avail="hele dag" class="px-2.5 py-2 rounded-lg border avail-yes hover:opacity-90 min-h-[2.25rem]">Hele dag</button>
+            <button type="button" data-quick-avail="ochtend" class="px-2.5 py-2 rounded-lg border avail-partial hover:opacity-90 min-h-[2.25rem]">Ochtend</button>
+            <button type="button" data-quick-avail="middag" class="px-2.5 py-2 rounded-lg border avail-partial hover:opacity-90 min-h-[2.25rem]">Middag</button>
+            <button type="button" data-quick-avail="misschien" class="px-2.5 py-2 rounded-lg border avail-maybe hover:opacity-90 min-h-[2.25rem]">Misschien</button>
+            <button type="button" data-quick-avail="x" class="px-2.5 py-2 rounded-lg border avail-no hover:opacity-90 min-h-[2.25rem]">Kan niet (x)</button>
+            <button type="button" data-quick-avail="" class="px-2.5 py-2 rounded-lg border avail-empty hover:bg-[#faf9f5] min-h-[2.25rem]">Leegmaken</button>
           </div>
         </div>
 
         <!-- Tijdbouwer (Vanaf / Tot / Tussen / DR) -->
-        <div class="bg-[#fbfaf6] rounded-xl border border-[#e5dfd1] p-3 space-y-2.5">
-          <span class="block font-bold text-stone-600 uppercase tracking-wider text-[10px]">Specifieke tijden samenstellen</span>
+        <div class="bg-[#faf9f5] rounded-lg border border-[#e6e3db] p-3 space-y-2.5">
+          <span class="block font-medium text-[#535d57]">Specifieke tijden</span>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-            <button type="button" data-time-mode="va" class="time-mode-btn px-2 py-1.5 rounded-lg border border-[#d6cfc0] bg-white text-[#163828] font-semibold">Vanaf ...</button>
-            <button type="button" data-time-mode="tot" class="time-mode-btn px-2 py-1.5 rounded-lg border border-[#d6cfc0] bg-white text-[#163828] font-semibold">Tot ...</button>
-            <button type="button" data-time-mode="tussen" class="time-mode-btn px-2 py-1.5 rounded-lg border border-[#d6cfc0] bg-white text-[#163828] font-semibold">Tussen ...</button>
-            <button type="button" data-time-mode="dr" class="time-mode-btn px-2 py-1.5 rounded-lg border border-[#d8b4fe] bg-[#f3e8ff] text-[#581c87] font-semibold">DR (geen tee time)</button>
+            <button type="button" data-time-mode="va" class="time-mode-btn quiet-btn">Vanaf...</button>
+            <button type="button" data-time-mode="tot" class="time-mode-btn quiet-btn">Tot...</button>
+            <button type="button" data-time-mode="tussen" class="time-mode-btn quiet-btn">Tussen...</button>
+            <button type="button" data-time-mode="dr" class="time-mode-btn px-2 py-1.5 rounded-lg border avail-dr min-h-[2.25rem]">DR</button>
           </div>
           <div id="timeBuilderInputs" class="hidden grid grid-cols-2 gap-2 pt-1">
             <div>
-              <label for="availTimeStart" class="block text-[10px] font-bold text-stone-500 mb-0.5">Starttijd</label>
-              <input id="availTimeStart" type="time" value="13:00" step="900" class="w-full rounded-lg border border-stone-300 px-2.5 py-1.5 text-sm font-mono-score bg-white" />
+              <label for="availTimeStart" class="block text-[11px] font-medium text-[#535d57] mb-0.5">Starttijd</label>
+              <input id="availTimeStart" type="time" value="13:00" step="900" class="w-full rounded-lg border border-[#8c867b] px-2.5 py-1.5 text-sm font-mono-score bg-white text-[#18241e]" />
             </div>
             <div id="availTimeEndWrap">
-              <label for="availTimeEnd" class="block text-[10px] font-bold text-stone-500 mb-0.5">Eindtijd</label>
-              <input id="availTimeEnd" type="time" value="16:00" step="900" class="w-full rounded-lg border border-stone-300 px-2.5 py-1.5 text-sm font-mono-score bg-white" />
+              <label for="availTimeEnd" class="block text-[11px] font-medium text-[#535d57] mb-0.5">Eindtijd</label>
+              <input id="availTimeEnd" type="time" value="16:00" step="900" class="w-full rounded-lg border border-[#8c867b] px-2.5 py-1.5 text-sm font-mono-score bg-white text-[#18241e]" />
             </div>
           </div>
         </div>
 
         <!-- Vrije invoer (zelfde notatie als Google Sheet) -->
         <div>
-          <label for="availRawInput" class="block font-bold text-stone-700 mb-1">Invoer (sheet-notatie, bijv. <code class="font-mono-score">va 13:00</code>, <code class="font-mono-score">tot 15:00</code>, <code class="font-mono-score">x vakantie</code>)</label>
-          <input id="availRawInput" type="text" autofocus autocomplete="off" placeholder="bijv. hele dag, va 13:00, tot 15:00, tussen 10:00 en 14:00, x" class="w-full rounded-xl border border-[#d6cfc0] bg-[#fbfaf6] px-3 py-2 text-sm text-[#163828] font-medium focus:outline-none focus:ring-2 focus:ring-[#163828]" />
-          <p id="availParsePreview" class="text-[11px] text-stone-500 mt-1.5"></p>
+          <label for="availRawInput" class="block font-medium text-[#535d57] mb-1">Sheet-notatie (bijv. <code class="font-mono-score">va 13:00</code>, <code class="font-mono-score">tot 15:00</code>, <code class="font-mono-score">x</code>)</label>
+          <input id="availRawInput" type="text" autofocus autocomplete="off" placeholder="hele dag, va 13:00, tot 15:00, x" class="w-full rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm text-[#18241e] font-medium focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]" />
+          <p id="availParsePreview" class="text-[11px] text-[#66706a] mt-1.5"></p>
         </div>
       </div>
 
       <!-- Modus B: Confirmed Tee Time & Opmerking -->
-      <div id="availConfirmFields" class="hidden space-y-3">
+      <div id="availConfirmFields" class="hidden space-y-3.5">
+        <div id="confirmBookingLinks" class="hidden bg-[#faf9f5] rounded-lg border border-[#e6e3db] p-3 space-y-2"></div>
+
         <div>
-          <label for="confirmTimeInput" class="block font-bold text-stone-700 mb-1">Bevestigde starttijd (Confirmed)</label>
+          <label for="confirmTimeInput" class="block font-medium text-[#535d57] mb-1">Bevestigde starttijd</label>
           <div class="flex items-center gap-2">
-            <input id="confirmTimeInput" type="time" class="flex-1 rounded-xl border border-[#d6cfc0] bg-[#fbfaf6] px-3 py-2 text-sm font-mono-score text-[#163828] focus:outline-none focus:ring-2 focus:ring-[#163828]" />
-            <button type="button" id="btnUseSuggestedTee" class="hidden px-3 py-2 rounded-xl bg-[#f2efe7] hover:bg-[#e5dfd1] text-[#163828] text-xs font-bold border border-[#d6cfc0] whitespace-nowrap"></button>
-            <button type="button" id="btnClearConfirmTime" class="px-3 py-2 rounded-xl border border-stone-300 text-stone-600 font-semibold hover:bg-stone-50">Wissen</button>
+            <input id="confirmTimeInput" type="time" class="flex-1 rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm font-mono-score text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]" />
+            <button type="button" id="btnUseSuggestedTee" class="hidden quiet-btn whitespace-nowrap"></button>
+            <button type="button" id="btnClearConfirmTime" class="quiet-btn">Wissen</button>
           </div>
-          <p id="confirmBookerHint" class="text-[11px] text-stone-500 mt-1"></p>
+          <p id="confirmBookerHint" class="text-[11px] text-[#66706a] mt-1.5"></p>
         </div>
 
         <div>
-          <label for="confirmNoteInput" class="block font-bold text-stone-700 mb-1">Opmerking / baan (optioneel, kolom J in sheet)</label>
-          <input id="confirmNoteInput" type="text" autocomplete="off" placeholder="bijv. Kromme Rijn 9 holes, Wijnfestival..." class="w-full rounded-xl border border-[#d6cfc0] bg-[#fbfaf6] px-3 py-2 text-sm text-[#163828]" />
+          <label for="confirmNoteInput" class="block font-medium text-[#535d57] mb-1">Opmerking of baan (optioneel)</label>
+          <input id="confirmNoteInput" type="text" autocomplete="off" placeholder="bijv. Kromme Rijn 9 holes" class="w-full rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]" />
         </div>
       </div>
 
-      <div class="pt-2 flex items-center justify-end gap-2 border-t border-[#efeae0]">
-        <button type="button" id="btnCancelAvailDialog" class="px-4 py-2 rounded-xl border border-stone-300 font-semibold text-stone-600 hover:bg-stone-50">Annuleren</button>
-        <button type="submit" class="px-4 py-2 rounded-xl bg-[#163828] hover:bg-[#22543d] text-white font-bold shadow-sm">Opslaan</button>
+      <!-- Modus C: Booker aanpassen / opnieuw loten -->
+      <div id="availBookerFields" class="hidden space-y-3.5">
+        <p id="bookerModalExplain" class="text-xs text-[#535d57] leading-relaxed"></p>
+        <div id="bookerMemberOptions" class="grid grid-cols-3 gap-2" role="group" aria-label="Kies booker uit aanwezige spelers"></div>
+        <div class="flex items-center justify-between gap-2 pt-1">
+          <button type="button" id="btnRerollBooker" class="quiet-btn inline-flex items-center gap-1.5">
+            <span aria-hidden="true">🎲</span>
+            <span>Opnieuw loten (eerlijk)</span>
+          </button>
+          <span id="bookerModeBadge" class="text-[11px] text-[#66706a]"></span>
+        </div>
+      </div>
+
+      <div class="pt-3 flex items-center justify-end gap-2 border-t border-[#e6e3db]">
+        <button type="button" id="btnCancelAvailDialog" class="quiet-btn">Annuleren</button>
+        <button type="submit" class="px-4 py-2 rounded-lg bg-[#1b3a2d] hover:bg-[#244b3a] text-white font-medium min-h-[2.25rem]">Opslaan</button>
       </div>
     </form>
   </dialog>
 
   <!-- Native Dialog: Google Sheet Live Koppeling (Apps Script) -->
   <dialog id="sheetSyncDialog" class="club-dialog club-dialog-wide" closedby="any" aria-labelledby="sheetSyncTitle">
-    <div class="fairway-stripes px-5 py-3.5 text-white flex items-center justify-between border-b-2 border-[#c5a059] shrink-0">
+    <div class="bg-white px-5 py-4 border-b border-[#e6e3db] flex items-center justify-between shrink-0">
       <div>
-        <h2 id="sheetSyncTitle" class="font-serif-club text-lg font-bold">Google Sheet Koppeling — Swingersclub E.v.</h2>
-        <p class="text-[11px] text-emerald-100/85">Synchroniseer live met tabblad <code class="font-mono-score">Huidig</code> via Google Apps Script</p>
+        <h2 id="sheetSyncTitle" class="font-serif-club text-lg font-semibold text-[#18241e]">Google Sheet koppeling</h2>
+        <p class="text-xs text-[#66706a] mt-0.5">Synchroniseer met tabblad <code class="font-mono-score">Huidig</code></p>
       </div>
-      <button type="button" id="btnCloseSyncDialog" aria-label="Sluiten" class="text-white/80 hover:text-white text-2xl leading-none px-1">&times;</button>
+      <button type="button" id="btnCloseSyncDialog" aria-label="Sluiten" class="text-[#66706a] hover:text-[#18241e] text-xl leading-none px-1.5 py-0.5 rounded">&times;</button>
     </div>
 
     <div class="p-4 sm:p-5 space-y-4 overflow-y-auto text-xs">
       <div class="space-y-2">
-        <label for="sheetWebAppUrl" class="block font-bold text-stone-700">Google Apps Script Web App URL</label>
+        <label for="sheetWebAppUrl" class="block font-medium text-[#535d57]">Google Apps Script Web-app URL</label>
         <div class="flex flex-col sm:flex-row gap-2">
-          <input id="sheetWebAppUrl" type="url" autofocus placeholder="https://script.google.com/macros/s/.../exec" class="flex-1 rounded-xl border border-[#d6cfc0] bg-[#fbfaf6] px-3 py-2 text-sm font-mono-score text-[#163828] focus:outline-none focus:ring-2 focus:ring-[#163828]" />
-          <button type="button" id="btnSaveAndSyncUrl" class="px-4 py-2 rounded-xl bg-[#163828] hover:bg-[#22543d] text-white font-bold whitespace-nowrap">Koppelen &amp; ophalen</button>
+          <input id="sheetWebAppUrl" type="url" autofocus placeholder="https://script.google.com/macros/s/.../exec" class="flex-1 rounded-lg border border-[#8c867b] bg-[#faf9f5] px-3 py-2 text-sm font-mono-score text-[#18241e] focus:outline-none focus:ring-2 focus:ring-[#1b3a2d]" />
+          <button type="button" id="btnSaveAndSyncUrl" class="px-4 py-2 rounded-lg bg-[#1b3a2d] hover:bg-[#244b3a] text-white font-medium whitespace-nowrap min-h-[2.25rem]">Koppelen</button>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-          <button type="button" id="btnDisconnectSheet" class="text-[11px] font-semibold text-rose-700 hover:underline">Koppeling verbreken (alleen lokaal)</button>
-          <button type="button" id="btnResetSeedData" class="text-[11px] font-semibold text-stone-600 hover:text-[#163828] hover:underline">Herstel naar laatste Sheet-snapshot</button>
+          <div class="flex flex-wrap items-center gap-3">
+            <button type="button" id="btnCopyShareConnectLink" class="hidden text-xs font-medium text-[#1b3a2d] hover:underline">Kopieer directe koppel-link</button>
+            <button type="button" id="btnDisconnectSheet" class="text-xs font-medium text-[#7c3539] hover:underline">Koppeling verbreken</button>
+          </div>
+          <button type="button" id="btnResetSeedData" class="text-xs font-medium text-[#535d57] hover:text-[#18241e] hover:underline">Herstel snapshot</button>
         </div>
-        <div id="sheetSyncModalStatus" class="hidden rounded-xl px-3 py-2 text-xs font-medium border"></div>
+        <div id="sheetSyncModalStatus" class="hidden rounded-lg px-3 py-2 text-xs font-medium border"></div>
       </div>
 
-      <!-- 2-minuten installatie-uitleg + kopieerbaar script -->
-      <div class="bg-[#fbfaf6] rounded-xl border border-[#e5dfd1] p-3.5 space-y-2.5">
+      <!-- Installatie-uitleg + kopieerbaar script -->
+      <div class="bg-[#faf9f5] rounded-lg border border-[#e6e3db] p-3.5 space-y-2.5">
         <div class="flex items-center justify-between gap-2">
-          <h3 class="font-bold text-[#163828]">Eenmalig instellen in jullie Google Sheet (2 minuten)</h3>
-          <button type="button" id="btnCopyAppsScript" class="px-3 py-1.5 rounded-lg bg-[#c5a059] hover:bg-[#d2af68] text-[#163828] font-bold text-[11px]">Kopieer Apps Script</button>
+          <h3 class="font-semibold text-[#18241e]">Instellen in Google Sheet</h3>
+          <button type="button" id="btnCopyAppsScript" class="quiet-btn">Kopieer script</button>
         </div>
-        <ol class="list-decimal list-inside space-y-1 text-stone-700 leading-relaxed">
-          <li>Open de Google Sheet <strong>Swingersclub E.v.</strong> en ga naar <strong>Extensies &rarr; Apps Script</strong>.</li>
-          <li>Plak het script hieronder (staat ook in <code class="font-mono-score">google-apps-script.gs</code>) en klik op <strong>Opslaan</strong>.</li>
-          <li>Klik rechtsboven op <strong>Implementeren &rarr; Nieuwe implementatie &rarr; Web-app</strong>.</li>
-          <li>Zet <em>Uitvoeren als</em> op <strong>Ik</strong> en <em>Wie heeft toegang</em> op <strong>Iedereen</strong>, klik op <strong>Implementeren</strong>.</li>
-          <li>Kopieer de <strong>Web-app-URL</strong> (eindigt op <code class="font-mono-score">/exec</code>) en plak hem hierboven.</li>
+        <ol class="list-decimal list-inside space-y-1 text-[#535d57] leading-relaxed prose-note">
+          <li>Open de Sheet en ga naar <strong>Extensies &rarr; Apps Script</strong>.</li>
+          <li>Plak het script uit <code class="font-mono-score">google-apps-script.gs</code> en sla op.</li>
+          <li>Kies <strong>Implementeren &rarr; Nieuwe implementatie &rarr; Web-app</strong>.</li>
+          <li>Zet toegang op <strong>Iedereen</strong> en plak de <code class="font-mono-score">/exec</code> URL hierboven.</li>
         </ol>
-        <pre id="appsScriptPreview" class="max-h-44 overflow-auto rounded-lg bg-[#163828] text-emerald-50 p-3 text-[11px] font-mono-score leading-snug"></pre>
+        <pre id="appsScriptPreview" class="max-h-40 overflow-auto rounded-lg bg-[#f2f0ea] border border-[#e6e3db] text-[#18241e] p-3 text-[11px] font-mono-score leading-snug"></pre>
       </div>
     </div>
   </dialog>

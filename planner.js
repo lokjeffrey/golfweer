@@ -51,16 +51,21 @@ function doGet() {
 }
 
 function doPost(e) {
+  const lock = LockService.getScriptLock();
   try {
+    lock.waitLock(10000);
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (body.action === 'batchUpsert' && Array.isArray(body.rows)) {
       body.rows.forEach(upsertRow);
     } else {
       upsertRow(body);
     }
+    SpreadsheetApp.flush();
     return jsonRes({ ok: true, ...readState() });
   } catch (err) {
     return jsonRes({ ok: false, error: String(err) });
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
   }
 }
 
@@ -78,29 +83,22 @@ function fmtDate(v) {
   return isNaN(d.getTime()) ? '' : Utilities.formatDate(d, TIMEZONE, 'yyyy-MM-dd');
 }
 
-function fmtTime(v) {
-  if (v === null || v === undefined || v === '') return '';
-  if (v instanceof Date) return Utilities.formatDate(v, TIMEZONE, 'HH:mm');
-  if (typeof v === 'number' && v >= 0 && v < 1) {
-    const m = Math.round(v * 1440);
-    return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
-  }
-  return String(v).trim();
-}
-
 function readState() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
   const last = sh.getLastRow();
   if (last < 2) return { rows: [], baseCredits: { tom: 0, jeff: 0, ed: 0 } };
-  const vals = sh.getRange(2, 1, last - 1, Math.max(10, sh.getLastColumn())).getValues();
+  const numCols = Math.max(10, sh.getLastColumn());
+  const rawDates = sh.getRange(2, 2, last - 1, 1).getValues();
+  const displayRows = sh.getRange(2, 1, last - 1, numCols).getDisplayValues();
   const today = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd');
   const baseCredits = { tom: 0, jeff: 0, ed: 0 };
   const rows = [];
-  vals.forEach(r => {
-    const d = fmtDate(r[1]);
-    if (!d) return;
-    const confirmed = fmtTime(r[8]);
+  for (let i = 0; i < displayRows.length; i++) {
+    const d = fmtDate(rawDates[i][0]);
+    if (!d) continue;
+    const r = displayRows[i];
+    const confirmed = String(r[8] || '').trim();
     if (d < today) {
       if (confirmed) {
         const b = String(r[7] || '').toLowerCase();
@@ -108,18 +106,19 @@ function readState() {
         else if (b.includes('jeff')) baseCredits.jeff++;
         else if (b.includes('ed')) baseCredits.ed++;
       }
-      return;
+      continue;
     }
     const row = {
       date: d,
       tom: String(r[2] || '').trim(),
       jeff: String(r[3] || '').trim(),
       ed: String(r[4] || '').trim(),
+      booker: String(r[7] || '').trim(),
       confirmed,
       note: String(r[9] || '').trim()
     };
-    if (row.tom || row.jeff || row.ed || row.confirmed || row.note) rows.push(row);
-  });
+    if (row.tom || row.jeff || row.ed || row.booker || row.confirmed || row.note) rows.push(row);
+  }
   return { rows, baseCredits, updatedAt: new Date().toISOString() };
 }
 
@@ -148,13 +147,14 @@ function upsertRow(item) {
     }
   }
   if (item.field) {
-    const map = { tom: 3, jeff: 4, ed: 5, confirmed: 9, note: 10 };
+    const map = { tom: 3, jeff: 4, ed: 5, booker: 8, confirmed: 9, note: 10 };
     if (map[item.field]) sh.getRange(rowIdx, map[item.field]).setValue(item.value ?? '');
     return;
   }
   if (item.tom !== undefined) sh.getRange(rowIdx, 3).setValue(item.tom);
   if (item.jeff !== undefined) sh.getRange(rowIdx, 4).setValue(item.jeff);
   if (item.ed !== undefined) sh.getRange(rowIdx, 5).setValue(item.ed);
+  if (item.booker !== undefined) sh.getRange(rowIdx, 8).setValue(item.booker);
   if (item.confirmed !== undefined) sh.getRange(rowIdx, 9).setValue(item.confirmed);
   if (item.note !== undefined) sh.getRange(rowIdx, 10).setValue(item.note);
 }`;
@@ -470,6 +470,20 @@ function upsertRow(item) {
     };
   }
 
+  function normalizeBookerKey(val) {
+    const s = String(val || '').trim().toLowerCase();
+    if (!s) return '';
+    if (s.includes('tom')) return 'tom';
+    if (s.includes('jeff')) return 'jeff';
+    if (s.includes('ed')) return 'ed';
+    return '';
+  }
+
+  function memberNameByKey(key) {
+    const m = MEMBERS.find(x => x.key === key);
+    return m ? m.name : '';
+  }
+
   function buildComputedSchedule() {
     const todayIso = getAmsterdamTodayIso();
     const totalDays = plannerState.weeksCount * 7;
@@ -486,9 +500,10 @@ function upsertRow(item) {
     });
     const dates = [...dateSet].sort();
 
-    // Eerlijke booker-rotatie bijhouden (chronologisch vanaf baseCredits)
+    // Eerlijke booker-verdeling bijhouden (chronologisch vanaf baseCredits)
     const runningCredits = { ...plannerState.baseCredits };
     const computedRows = [];
+    let dirtyBookerLock = false;
 
     for (const dateIso of dates) {
       const rawRow = plannerState.rowsByDate[dateIso] || { tom: '', jeff: '', ed: '', confirmed: '', note: '' };
@@ -502,14 +517,10 @@ function upsertRow(item) {
       const availMembers = MEMBERS.filter(m => parsed[m.key].available);
       const drMembers = MEMBERS.filter(m => parsed[m.key].isDR);
       const count = availMembers.length;
-      const hasMaybe = availMembers.some(m => parsed[m.key].maybe);
 
-      // Potentieel voor een Tee time (GOGOGO = 3, GO = 2; DR telt niet mee)
+      // Overlap & Potentieel berekening: alleen GO / GOGOGO als er daadwerkelijk overlap is!
       let potentieel = '';
-      if (count === 3) potentieel = 'GOGOGO';
-      else if (count === 2) potentieel = 'GO';
-
-      // Overlap berekening voor mogelijke Tee times
+      let playingMembers = availMembers;
       let overlapStart = null;
       let overlapEnd = null;
       let overlapText = '';
@@ -526,29 +537,45 @@ function upsertRow(item) {
         const mS = Math.max(...starts);
         const mE = Math.min(...ends);
 
-        if (mS >= mE) {
-          overlapText = 'Geen overlap';
-          // Als 3 spelers kunnen maar er geen 3-way overlap is, check of 2 spelers wél overlappen!
-          if (count === 3) {
-            const pairs = [[0, 1], [0, 2], [1, 2]];
-            for (const [i, j] of pairs) {
-              const a = availMembers[i];
-              const b = availMembers[j];
-              const pS = Math.max(parsed[a.key].startMins, parsed[b.key].startMins);
-              const pE = Math.min(parsed[a.key].endMins, parsed[b.key].endMins);
-              if (pS < pE) {
-                partialPairTip = `Wel overlap ${a.shortName} & ${b.shortName}: ${minsToHHMM(pS)} – ${minsToHHMM(pE)}`;
-                break;
-              }
-            }
-          }
-        } else {
+        if (mS < mE) {
           overlapStart = mS;
           overlapEnd = mE;
           overlapText = `${minsToHHMM(mS)} – ${minsToHHMM(mE)}`;
           hasOverlap = true;
+          potentieel = count === 3 ? 'GOGOGO' : 'GO';
+          playingMembers = availMembers;
+        } else if (count === 3) {
+          // Geen 3-way overlap: check of er wél een koppel van 2 spelers overlapt
+          let bestPair = null;
+          const pairs = [[0, 1, 2], [0, 2, 1], [1, 2, 0]];
+          for (const [i, j, k] of pairs) {
+            const a = availMembers[i];
+            const b = availMembers[j];
+            const c = availMembers[k];
+            const pS = Math.max(parsed[a.key].startMins, parsed[b.key].startMins);
+            const pE = Math.min(parsed[a.key].endMins, parsed[b.key].endMins);
+            if (pS < pE && (!bestPair || (pE - pS) > (bestPair.end - bestPair.start))) {
+              bestPair = { a, b, excluded: c, start: pS, end: pE };
+            }
+          }
+          if (bestPair) {
+            overlapStart = bestPair.start;
+            overlapEnd = bestPair.end;
+            overlapText = `${minsToHHMM(bestPair.start)} – ${minsToHHMM(bestPair.end)}`;
+            hasOverlap = true;
+            potentieel = 'GO';
+            playingMembers = [bestPair.a, bestPair.b];
+            partialPairTip = `Alleen ${bestPair.a.shortName} & ${bestPair.b.shortName} (${bestPair.excluded.shortName} overlapt niet)`;
+          } else {
+            overlapText = 'Geen overlap';
+          }
+        } else {
+          // 2 spelers zonder overlap -> geen GO
+          overlapText = 'Geen overlap';
         }
       }
+
+      const hasMaybe = playingMembers.some(m => parsed[m.key].maybe);
 
       // Optionele losse Driving Range notitie (altijd los van Tee times)
       let drNote = '';
@@ -561,14 +588,48 @@ function upsertRow(item) {
       const confirmed = String(rawRow.confirmed || '').trim();
       const note = String(rawRow.note || '').trim();
 
-      // Booker bepalen (alleen wanneer er daadwerkelijk een Tee time mogelijk of bevestigd is)
+      // Booker bepalen: eerlijk op basis van minste vorige boekingen, bij gelijke stand RANDOM geloot
+      // uit de aanwezige spelers en direct vastgelegd. Handmatige keuze blijft behouden zolang die speler aanwezig is.
       let bookerMember = null;
-      if (potentieel && (hasOverlap || confirmed)) {
-        const sortedCandidates = [...availMembers].sort((a, b) => {
-          const diff = (runningCredits[a.key] || 0) - (runningCredits[b.key] || 0);
-          return diff !== 0 ? diff : MEMBERS.indexOf(a) - MEMBERS.indexOf(b);
-        });
-        bookerMember = sortedCandidates[0] || null;
+      let bookerManual = false;
+      let bookerFairPool = [];
+      const creditsSnapshot = { ...runningCredits };
+
+      if ((potentieel && hasOverlap) || (confirmed && availMembers.length > 0)) {
+        const candidates = (potentieel && hasOverlap) ? playingMembers : availMembers;
+        const minCredits = Math.min(...candidates.map(m => runningCredits[m.key] || 0));
+        bookerFairPool = candidates.filter(m => (runningCredits[m.key] || 0) === minCredits);
+
+        const savedKey = normalizeBookerKey(rawRow.booker);
+        const savedManual = Boolean(rawRow.bookerManual);
+
+        if (savedManual && savedKey && candidates.some(m => m.key === savedKey)) {
+          // Handmatig gekozen booker die nog steeds aanwezig is
+          bookerMember = candidates.find(m => m.key === savedKey);
+          bookerManual = true;
+        } else if (savedKey && bookerFairPool.some(m => m.key === savedKey)) {
+          // Eerder (eerlijk & random) vastgelegde booker die nog steeds in de eerlijke poule zit
+          bookerMember = bookerFairPool.find(m => m.key === savedKey);
+          bookerManual = false;
+        } else if (bookerFairPool.length > 0) {
+          // Willekeurig loten uit de aanwezige spelers met de minste eerdere boekingen en direct vastleggen
+          const picked = bookerFairPool[Math.floor(Math.random() * bookerFairPool.length)];
+          bookerMember = picked;
+          bookerManual = false;
+          if (!plannerState.rowsByDate[dateIso]) {
+            plannerState.rowsByDate[dateIso] = { tom: '', jeff: '', ed: '', booker: '', bookerManual: false, confirmed: '', note: '' };
+          }
+          plannerState.rowsByDate[dateIso].booker = picked.key;
+          plannerState.rowsByDate[dateIso].bookerManual = false;
+          dirtyBookerLock = true;
+        }
+      } else if (rawRow.booker || rawRow.bookerManual) {
+        // Geen overlap / geen tee time meer -> oude booker wissen
+        if (plannerState.rowsByDate[dateIso]) {
+          plannerState.rowsByDate[dateIso].booker = '';
+          plannerState.rowsByDate[dateIso].bookerManual = false;
+          dirtyBookerLock = true;
+        }
       }
 
       // Verhoog booker-teller zodra een dag een bevestigde starttijd heeft
@@ -579,11 +640,11 @@ function upsertRow(item) {
       // Live Golfweer & optimale starttijd binnen overlap (voor de eerste 7 dagen)
       const weatherDay = weatherByDate[dateIso] || null;
       let weatherOverlap = null;
-      if (weatherDay && hasOverlap && count >= 2) {
+      if (weatherDay && hasOverlap && playingMembers.length >= 2) {
         weatherOverlap = computeWeatherTeeTimeInOverlap(overlapStart, overlapEnd, weatherDay);
       }
 
-      const shortWindowWarning = hasOverlap && count >= 2 && (overlapEnd - overlapStart) < roundMins;
+      const shortWindowWarning = hasOverlap && playingMembers.length >= 2 && (overlapEnd - overlapStart) < roundMins;
       const dateMeta = formatDateMeta(dateIso, todayIso);
 
       computedRows.push({
@@ -591,7 +652,8 @@ function upsertRow(item) {
         dateMeta,
         rawRow,
         parsed,
-        availMembers,
+        availMembers: playingMembers,
+        allAvailMembers: availMembers,
         drMembers,
         count,
         hasMaybe,
@@ -605,6 +667,9 @@ function upsertRow(item) {
         partialPairTip,
         shortWindowWarning,
         bookerMember,
+        bookerManual,
+        bookerFairPool,
+        creditsBeforeDay: creditsSnapshot,
         confirmed,
         note,
         weatherDay,
@@ -612,6 +677,10 @@ function upsertRow(item) {
         course,
         holes
       });
+    }
+
+    if (dirtyBookerLock) {
+      saveLocalData();
     }
 
     return {
@@ -666,11 +735,11 @@ function upsertRow(item) {
     const banner = el('plannerStatusBanner');
     if (banner) {
       const tones = {
-        success: 'bg-emerald-50 text-emerald-900 border-emerald-200',
-        info: 'bg-amber-50 text-amber-900 border-amber-200',
-        error: 'bg-rose-50 text-rose-900 border-rose-200'
+        success: 'bg-[#f1f6f3] text-[#1b4332] border-[#c7dcd0]',
+        info: 'bg-[#faf7ef] text-[#5c4518] border-[#e3d6b8]',
+        error: 'bg-[#faf4f4] text-[#592629] border-[#dfc5c7]'
       };
-      banner.className = `text-xs font-medium rounded-xl px-3.5 py-2.5 border ${tones[tone] || tones.info}`;
+      banner.className = `text-xs font-medium rounded-lg px-3.5 py-2.5 border ${tones[tone] || tones.info}`;
       banner.textContent = msg;
       banner.classList.remove('hidden');
       clearTimeout(banner._hideTimer);
@@ -685,8 +754,8 @@ function upsertRow(item) {
     if (!pill) return;
 
     if (plannerState.isSyncing) {
-      pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Synchroniseren...`;
-      pill.className = 'inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-200';
+      pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-[#8f723d] animate-pulse" aria-hidden="true"></span> Sync...`;
+      pill.className = 'inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-[#faf7ef] text-[#5c4518] border border-[#e3d6b8]';
       return;
     }
 
@@ -694,14 +763,73 @@ function upsertRow(item) {
       const timeLabel = plannerState.lastSyncedAt
         ? new Date(plannerState.lastSyncedAt).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
         : '';
-      pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Google Sheet live${timeLabel ? ` (${timeLabel})` : ''}`;
-      pill.className = 'inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-900 border border-emerald-200';
+      pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-[#1f573d]" aria-hidden="true"></span> Live${timeLabel ? ` · ${timeLabel}` : ''}`;
+      pill.className = 'inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-[#f1f6f3] text-[#1b4332] border border-[#c7dcd0]';
       if (syncNowBtn) syncNowBtn.classList.remove('hidden');
     } else {
-      pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Lokaal opgeslagen`;
-      pill.className = 'inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[#f2efe7] text-stone-700 border border-[#e5dfd1]';
+      pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-[#8f723d]" aria-hidden="true"></span> Lokaal`;
+      pill.className = 'inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-[#f2f0ea] text-[#535d57] border border-[#e6e3db]';
       if (syncNowBtn) syncNowBtn.classList.add('hidden');
     }
+  }
+
+  function applyRemoteState(data) {
+    if (data.baseCredits) {
+      plannerState.baseCredits = {
+        tom: Number(data.baseCredits.tom) || 0,
+        jeff: Number(data.baseCredits.jeff) || 0,
+        ed: Number(data.baseCredits.ed) || 0
+      };
+    }
+    if (Array.isArray(data.rows)) {
+      const prevMap = plannerState.rowsByDate || {};
+      const nextMap = {};
+      data.rows.forEach(r => {
+        if (r.date) {
+          const prev = prevMap[r.date] || {};
+          const remoteBooker = normalizeBookerKey(r.booker);
+          const bookerKey = remoteBooker || normalizeBookerKey(prev.booker);
+          nextMap[r.date] = {
+            tom: r.tom || '',
+            jeff: r.jeff || '',
+            ed: r.ed || '',
+            booker: bookerKey,
+            bookerManual: Boolean(prev.bookerManual && (!remoteBooker || remoteBooker === normalizeBookerKey(prev.booker))),
+            confirmed: r.confirmed || '',
+            note: r.note || ''
+          };
+        }
+      });
+      plannerState.rowsByDate = nextMap;
+    }
+    plannerState.lastSyncedAt = new Date().toISOString();
+    saveLocalData();
+  }
+
+  function maybeAutoPullFromSheet() {
+    if (!plannerState.sheetUrl || plannerState.isSyncing) return;
+    const lastMs = plannerState.lastSyncedAt ? Date.parse(plannerState.lastSyncedAt) : 0;
+    if (Date.now() - lastMs > 20000) {
+      pullFromGoogleSheet(true);
+    }
+  }
+
+  function importSheetUrlFromLocation() {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const hashStr = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+      const hashParams = new URLSearchParams(hashStr);
+      const candidate = (searchParams.get('sheet') || hashParams.get('sheet') || '').trim();
+      if (candidate && /^https:\/\/script\.google\.com\/macros\/s\//i.test(candidate)) {
+        plannerState.sheetUrl = candidate;
+        saveLocalData();
+        // Schoon de URL op zodat de /exec-URL niet zichtbaar blijft in de adresbalk
+        const cleanUrl = window.location.origin + window.location.pathname;
+        window.history?.replaceState?.({}, document.title, cleanUrl);
+        return true;
+      }
+    } catch (e) {}
+    return false;
   }
 
   async function pullFromGoogleSheet(silent = false) {
@@ -714,33 +842,11 @@ function upsertRow(item) {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Onbekende fout uit Google Sheet');
 
-      if (data.baseCredits) {
-        plannerState.baseCredits = {
-          tom: Number(data.baseCredits.tom) || 0,
-          jeff: Number(data.baseCredits.jeff) || 0,
-          ed: Number(data.baseCredits.ed) || 0
-        };
-      }
-      if (Array.isArray(data.rows)) {
-        const nextMap = {};
-        data.rows.forEach(r => {
-          if (r.date) {
-            nextMap[r.date] = {
-              tom: r.tom || '',
-              jeff: r.jeff || '',
-              ed: r.ed || '',
-              confirmed: r.confirmed || '',
-              note: r.note || ''
-            };
-          }
-        });
-        plannerState.rowsByDate = nextMap;
-      }
-      plannerState.lastSyncedAt = new Date().toISOString();
-      saveLocalData();
+      applyRemoteState(data);
       plannerState.isSyncing = false;
       updateSyncPillUi();
       renderPlanner();
+      window.GolfWeerApp?.refreshSingleCourse?.();
       if (!silent) showPlannerStatus('Planning live opgehaald uit Google Sheet "Swingersclub E.v."!', 'success');
       return true;
     } catch (err) {
@@ -767,15 +873,113 @@ function upsertRow(item) {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Opslaan in Sheet mislukt');
 
-      plannerState.lastSyncedAt = new Date().toISOString();
-      saveLocalData();
+      applyRemoteState(data);
       plannerState.isSyncing = false;
       updateSyncPillUi();
+      renderPlanner();
+      window.GolfWeerApp?.refreshSingleCourse?.();
     } catch (err) {
       plannerState.isSyncing = false;
       updateSyncPillUi();
       showPlannerStatus(`Lokaal opgeslagen, maar Sheet-sync gaf een fout: ${err.message}`, 'error');
     }
+  }
+
+  function renderBookingLinksHtml(dateIso, overlapEndMins, variant = 'compact') {
+    const app = window.GolfWeerApp;
+    const courses = app?.getBookingCourses?.() || [];
+    if (!courses.length) return '';
+
+    const items = courses
+      .map(c => app.getCourseBookingStatus(c, dateIso, overlapEndMins))
+      .filter(Boolean);
+    if (!items.length) return '';
+
+    const primaryItems = items.filter(i => i.primary);
+    const secondaryItems = items.filter(i => !i.primary);
+
+    const renderModalItem = (item) => {
+      const metaBits = [];
+      if (item.isMember) metaBits.push('lid');
+      if (item.weatherScore !== null) metaBits.push(`weer ${item.weatherScore}`);
+      if (!item.isOpenNow) metaBits.push(item.openFromLabel);
+      else if (item.guestNote) metaBits.push(item.guestNote);
+      else if (item.advanceDays) metaBits.push(`nu open (${item.advanceDays}d)`);
+      else metaBits.push(item.system);
+
+      return `
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer"
+          title="${escapeHtml(item.rule)}"
+          class="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-[#e6e3db] bg-white hover:border-[#163828] transition text-[#18241e]">
+          <div class="min-w-0">
+            <div class="text-xs font-medium truncate">${escapeHtml(item.shortName)}</div>
+            <div class="text-[10px] ${!item.isOpenNow || item.guestNote ? 'text-[#755c2e]' : item.isMember ? 'text-[#1b5e3d]' : 'text-[#66706a]'} truncate">${escapeHtml(metaBits.join(' · '))}</div>
+          </div>
+          <span class="text-xs text-[#1b3a2d] shrink-0" aria-hidden="true">&nearr;</span>
+        </a>
+      `;
+    };
+
+    if (variant === 'modal') {
+      return `
+        <div class="text-[11px] font-medium text-[#535d57]">Check vrije starttijden</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          ${primaryItems.map(renderModalItem).join('')}
+        </div>
+        ${secondaryItems.length ? `
+          <details class="pt-1">
+            <summary class="text-[11px] font-medium text-[#535d57] hover:text-[#18241e] cursor-pointer select-none">
+              Overige banen (${secondaryItems.length})
+            </summary>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mt-2">
+              ${secondaryItems.map(renderModalItem).join('')}
+            </div>
+          </details>
+        ` : ''}
+      `;
+    }
+
+    const renderCompactPill = (item) => {
+      const suffixBits = [];
+      if (item.isMember) suffixBits.push('lid');
+      if (item.weatherScore !== null) suffixBits.push(String(item.weatherScore));
+      if (!item.isOpenNow) suffixBits.push(item.openFromLabel);
+      else if (item.guestNote) suffixBits.push(item.guestNote);
+      const suffix = suffixBits.length ? ` · ${suffixBits.join(', ')}` : '';
+      return `
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer"
+          title="${escapeHtml(item.rule)}"
+          class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md border text-[10px] font-medium transition ${
+            !item.isOpenNow
+              ? 'bg-[#f6f5f0] border-[#e6e3db] text-[#66706a] hover:border-[#8c867b]'
+              : item.isMember
+                ? 'bg-[#f1f6f3] border-[#c7dcd0] text-[#1b4332] hover:border-[#163828]'
+                : 'bg-[#faf9f5] border-[#d6cfc0] text-[#1b3a2d] hover:border-[#163828] hover:bg-[#f1f6f3]'
+          }">
+          <span>${escapeHtml(item.shortName)}</span>${suffix ? `<span class="font-mono-score opacity-80">${escapeHtml(suffix)}</span>` : ''}<span aria-hidden="true">↗</span>
+        </a>
+      `;
+    };
+
+    // Compacte snelkoppelingen onderaan een GO/GOGOGO kaart (4 thuisbanen + uitklapbaar voor overige 5)
+    return `
+      <div class="pt-2 border-t border-[#efede6] space-y-1.5">
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="text-[10px] font-medium text-[#66706a] mr-0.5">Boek:</span>
+          ${primaryItems.map(renderCompactPill).join('')}
+        </div>
+        ${secondaryItems.length ? `
+          <details class="text-[10px]">
+            <summary class="text-[#66706a] hover:text-[#18241e] cursor-pointer select-none inline-block">
+              + Overige banen (${secondaryItems.length})
+            </summary>
+            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+              ${secondaryItems.map(renderCompactPill).join('')}
+            </div>
+          </details>
+        ` : ''}
+      </div>
+    `;
   }
 
   // ============================================================
@@ -803,24 +1007,24 @@ function upsertRow(item) {
     // Hint welke baan/holes gebruikt wordt voor de 7-daagse weer-integratie
     const hintEl = el('plannerCourseWeatherHint');
     if (hintEl && course) {
-      hintEl.innerHTML = `Eerste 7 dagen gekoppeld aan <strong>${escapeHtml(course.name)}</strong> (${holes} holes) • Tik op een cel om beschikbaarheid of bevestigde tee time aan te passen.`;
+      hintEl.textContent = `${course.name} · ${holes} holes`;
     }
 
     // 1. Eerlijke Booker-rotatie teller
     const creditsBar = el('bookerCreditsBar');
     if (creditsBar) {
       const minCredits = Math.min(finalCredits.tom, finalCredits.jeff, finalCredits.ed);
-      creditsBar.innerHTML = MEMBERS.map(m => {
+      creditsBar.innerHTML = `<span class="text-[#66706a] mr-1">Beurt:</span>` + MEMBERS.map(m => {
         const count = finalCredits[m.key] || 0;
         const isNext = count === minCredits;
         return `
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs ${
             isNext
-              ? 'bg-[#163828] text-white border-[#c5a059] font-bold'
-              : 'bg-white text-stone-700 border-[#e5dfd1] font-semibold'
+              ? 'bg-white text-[#18241e] border-[#163828] font-semibold'
+              : 'bg-[#f6f5f0] text-[#535d57] border-[#e6e3db] font-medium'
           }">
             <span>${m.name}</span>
-            <span class="font-mono-score text-[11px] ${isNext ? 'text-[#e7cf9b]' : 'text-stone-500'}">${count}&times;</span>
+            <span class="font-mono-score text-[11px] ${isNext ? 'text-[#163828]' : 'text-[#66706a]'}">${count}&times;</span>
           </span>
         `;
       }).join('');
@@ -831,76 +1035,64 @@ function upsertRow(item) {
     if (picker) {
       picker.querySelectorAll('button[data-member]').forEach(btn => {
         const active = btn.dataset.member === plannerState.activeMember;
-        btn.className = active
-          ? 'py-1.5 px-1 rounded-lg font-bold bg-[#163828] text-white transition'
-          : 'py-1.5 px-1 rounded-lg font-semibold text-stone-700 hover:text-[#163828] transition';
+        btn.className = 'seg-btn';
+        btn.setAttribute('aria-pressed', String(active));
       });
     }
 
-    // 3. Komende Mogelijkheden / Kansrijke Tee Times Banner
+    // 3. Komende Mogelijkheden / Kansrijke Tee Times
     const highlightsEl = el('plannerHighlights');
     if (highlightsEl) {
       const highlights = rows.filter(r => r.confirmed || (r.potentieel && r.hasOverlap)).slice(0, 6);
       if (highlights.length === 0) {
-        highlightsEl.innerHTML = `
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div class="text-[10px] font-bold uppercase tracking-widest text-[#e7cf9b]">⛳ Komende Tee-Time Mogelijkheden</div>
-              <h3 class="font-serif-club text-lg font-bold mt-0.5">Nog geen overlappende GO / GOGOGO dagen gevonden</h3>
-              <p class="text-xs text-emerald-100/85 mt-0.5">Vul hieronder beschikbaarheid in voor Tom 🦩, Jeff en Ed om direct mogelijke tee times te zien.</p>
-            </div>
-          </div>
-        `;
+        highlightsEl.classList.add('hidden');
+        highlightsEl.innerHTML = '';
       } else {
+        highlightsEl.classList.remove('hidden');
         highlightsEl.innerHTML = `
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div class="text-[10px] font-bold uppercase tracking-widest text-[#e7cf9b]">★ Komende Tee-Time Mogelijkheden</div>
-              <p class="text-xs text-emerald-100/85">Dagen met 2 of 3 beschikbare spelers en overlappende tijden (inclusief live weer binnen 7 dagen)</p>
-            </div>
-            <span class="font-mono-score text-[11px] font-bold px-2.5 py-1 rounded-full bg-white/10 border border-[#c5a059]/50 text-[#e7cf9b]">
-              ${highlights.length} ${highlights.length === 1 ? 'optie' : 'opties'}
-            </span>
+          <div class="flex items-center justify-between px-1">
+            <h3 class="text-xs font-medium text-[#535d57]">Komende opties · <span class="font-mono-score">${highlights.length}</span></h3>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
             ${highlights.map(r => {
               const statusBadge = r.confirmed
-                ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-400 text-[#163828]">BEVESTIGD ${escapeHtml(r.confirmed)}</span>`
+                ? `<span class="px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#163828] text-white font-mono-score">Bevestigd ${escapeHtml(r.confirmed)}</span>`
                 : r.potentieel === 'GOGOGO'
-                  ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#c5a059] text-[#163828]">GOGOGO (3/3)</span>`
-                  : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">GO (2/3)</span>`;
+                  ? `<span class="px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#1b5e3d] text-white">GOGOGO</span>`
+                  : `<span class="px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#f9f3e3] text-[#6d5120] border border-[#dec68e]">GO</span>`;
 
-              const playersText = r.availMembers.map(m => m.name + (r.parsed[m.key].maybe ? '?' : '')).join(' · ');
-              let weatherSnippet = '';
-              if (r.weatherDay && scoreMetaFn) {
-                if (r.weatherOverlap && r.weatherOverlap.possible) {
-                  const bm = scoreMetaFn(r.weatherOverlap.score);
-                  weatherSnippet = `
-                    <div class="mt-2 pt-2 border-t border-white/15 flex items-center justify-between gap-2 text-[11px]">
-                      <span class="text-emerald-100">${r.weatherDay.icon} ${escapeHtml(r.weatherOverlap.label)}</span>
-                      <span class="font-mono-score font-bold px-1.5 py-0.5 rounded text-[10px]" style="${bm.bgStyle}">${r.weatherOverlap.score}</span>
-                    </div>
-                  `;
-                } else if (r.weatherOverlap && !r.weatherOverlap.possible) {
-                  weatherSnippet = `<div class="mt-2 pt-2 border-t border-white/15 text-[11px] text-amber-200">🌙 ${escapeHtml(r.weatherOverlap.reason)}</div>`;
-                }
+              const playersText = r.availMembers.map(m => m.shortName + (r.parsed[m.key].maybe ? '?' : '')).join(' · ');
+              const metaParts = [];
+              if (r.bookerMember) metaParts.push(`Booker: ${escapeHtml(r.bookerMember.shortName)}`);
+              if (r.weatherDay && r.weatherOverlap?.possible) {
+                metaParts.push(`Weer ${r.weatherOverlap.score} · ${escapeHtml(r.weatherOverlap.label)}`);
+              } else if (r.weatherOverlap && !r.weatherOverlap.possible) {
+                metaParts.push(escapeHtml(r.weatherOverlap.reason));
               }
+              if (r.note) metaParts.push(escapeHtml(r.note));
+
+              const bookingLinksHtml = renderBookingLinksHtml(
+                r.dateIso,
+                r.hasOverlap ? r.overlapEnd : null,
+                'compact'
+              );
 
               return `
-                <button type="button" data-focus-date="${r.dateIso}"
-                  class="text-left rounded-xl p-3 bg-white/10 hover:bg-white/15 border ${r.confirmed ? 'border-emerald-300/80' : 'border-[#c5a059]/45'} transition flex flex-col justify-between">
-                  <div>
+                <div class="rounded-xl p-3.5 bg-white border border-[#e6e3db] hover:border-[#163828]/50 transition flex flex-col justify-between gap-2.5 ${r.confirmed ? 'border-l-[3px] border-l-[#163828]' : 'border-l-[3px] border-l-[#b89652]'}">
+                  <button type="button" data-focus-date="${r.dateIso}" class="text-left space-y-1.5 w-full cursor-pointer">
                     <div class="flex items-center justify-between gap-2">
-                      <span class="font-serif-club font-bold text-sm text-white">${r.dateMeta.displayDay} ${r.dateMeta.dateShort}</span>
+                      <span class="font-serif-club font-semibold text-sm text-[#18241e]">${r.dateMeta.displayDay} ${r.dateMeta.dateShort}</span>
                       ${statusBadge}
                     </div>
-                    <div class="font-mono-score text-xs font-bold text-[#e7cf9b] mt-1">${escapeHtml(r.overlapText)}</div>
-                    <div class="text-[11px] text-emerald-100/90 mt-1">${escapeHtml(playersText)}</div>
-                    ${r.bookerMember ? `<div class="text-[10px] text-emerald-200/85 mt-0.5">Booker: <strong>${escapeHtml(r.bookerMember.name)}</strong></div>` : ''}
-                    ${r.note ? `<div class="text-[10px] text-amber-200 mt-0.5 truncate">📝 ${escapeHtml(r.note)}</div>` : ''}
-                  </div>
-                  ${weatherSnippet}
-                </button>
+                    <div class="text-xs text-[#535d57]">
+                      <span class="font-mono-score font-medium text-[#18241e]">${escapeHtml(r.overlapText)}</span>
+                      <span class="text-[#cfc9bc] mx-1" aria-hidden="true">·</span>
+                      <span>${escapeHtml(playersText)}</span>
+                    </div>
+                    ${metaParts.length ? `<div class="text-[11px] text-[#66706a] truncate">${metaParts.join(' · ')}</div>` : ''}
+                  </button>
+                  ${bookingLinksHtml}
+                </div>
               `;
             }).join('')}
           </div>
@@ -912,7 +1104,7 @@ function upsertRow(item) {
             if (tr) {
               tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
               tr.classList.add('pulse-gold');
-              setTimeout(() => tr.classList.remove('pulse-gold'), 1400);
+              setTimeout(() => tr.classList.remove('pulse-gold'), 1200);
             }
           });
         });
@@ -933,8 +1125,8 @@ function upsertRow(item) {
     if (filteredRows.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="8" class="p-6 text-center text-stone-500">
-            Geen dagen gevonden voor dit filter. Kies <strong>Alle dagen</strong> om de hele planning te zien.
+          <td colspan="8" class="p-6 text-center text-[#66706a]">
+            Geen dagen gevonden voor dit filter. Kies <strong>Alle dagen</strong> om de planning te zien.
           </td>
         </tr>
       `;
@@ -955,10 +1147,11 @@ function upsertRow(item) {
         const bm = scoreMetaFn(r.weatherDay.score);
         dateWeatherChip = `
           <button type="button" data-jump-weather-day="${r.weatherDay.dayIndex}"
-            class="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-mono-score font-bold hover:opacity-90 transition"
-            style="${bm.bgStyle}">
-            <span>${r.weatherDay.icon} ${r.weatherDay.score}</span>
-            <span class="opacity-85 font-normal">• ${r.weatherDay.temp}°</span>
+            class="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-mono-score font-medium hover:opacity-85 transition"
+            style="${bm.tintStyle}">
+            <span>${r.weatherDay.score}</span>
+            <span aria-hidden="true">·</span>
+            <span>${r.weatherDay.temp}°</span>
           </button>
         `;
       }
@@ -967,7 +1160,7 @@ function upsertRow(item) {
       const memberCells = MEMBERS.map(m => {
         const p = r.parsed[m.key];
         const isActive = plannerState.activeMember === m.key;
-        const label = p.displayLabel ? escapeHtml(p.displayLabel) : '+ Invullen';
+        const label = p.displayLabel ? escapeHtml(p.displayLabel) : '+';
         const ariaLabel = `${m.name} op ${r.dateMeta.weekdayLong} ${r.dateMeta.dateShort}: ${p.summary}, klik om te bewerken`;
         return `
           <td>
@@ -976,79 +1169,88 @@ function upsertRow(item) {
               data-edit-date="${r.dateIso}"
               aria-label="${escapeHtml(ariaLabel)}"
               class="avail-cell-btn ${p.cssClass} ${isActive ? 'avail-active-member' : ''}">
-              <span class="block truncate">${label}</span>
+              <span class="block truncate ${!p.displayLabel ? 'text-center' : ''}">${label}</span>
             </button>
           </td>
         `;
       }).join('');
 
-      // Potentieel badge (kolom F)
-      let potHtml = `<span class="text-stone-300 font-mono-score">—</span>`;
+      // Potentieel badge (kolom Status)
+      let potHtml = `<span class="text-[#918b80] font-mono-score">—</span>`;
       if (r.potentieel === 'GOGOGO') {
         potHtml = `
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-extrabold tracking-wide bg-[#14643c] text-white shadow-sm">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#1b5e3d] text-white">
             GOGOGO
           </span>
-          ${r.hasMaybe ? '<div class="text-[9px] text-sky-700 font-semibold mt-0.5">o.v.b. misschien</div>' : ''}
+          ${r.hasMaybe ? '<div class="text-[10px] text-[#2a4354] mt-0.5">o.v.b.</div>' : ''}
         `;
       } else if (r.potentieel === 'GO') {
         potHtml = `
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-extrabold tracking-wide bg-[#c5a059] text-[#163828]">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#f9f3e3] text-[#6d5120] border border-[#dec68e]">
             GO
           </span>
-          ${r.hasMaybe ? '<div class="text-[9px] text-sky-700 font-semibold mt-0.5">o.v.b. misschien</div>' : ''}
+          ${r.hasMaybe ? '<div class="text-[10px] text-[#2a4354] mt-0.5">o.v.b.</div>' : ''}
         `;
       } else if (r.drMembers.length >= 2) {
         potHtml = `
-          <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold bg-[#f3e8ff] text-[#581c87] border border-[#d8b4fe]">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#f6f4f8] text-[#4a3761] border border-[#d9d0e3]">
             DR (${r.drMembers.length})
           </span>
         `;
       }
 
-      // Tee time & Weer cel (kolom G + live overlap-weer)
+      // Tee time & Weer cel
       let teeParts = [];
       if (r.overlapText) {
         const isNoOverlap = !r.hasOverlap;
         teeParts.push(`
-          <div class="font-mono-score text-xs font-bold ${isNoOverlap ? 'text-rose-700' : 'text-[#163828]'}">
+          <div class="font-mono-score text-xs font-medium ${isNoOverlap ? 'text-[#72363a]' : 'text-[#18241e]'}">
             ${escapeHtml(r.overlapText)}
           </div>
         `);
         if (r.partialPairTip) {
-          teeParts.push(`<div class="text-[10px] text-amber-800 font-medium">${escapeHtml(r.partialPairTip)}</div>`);
+          teeParts.push(`<div class="text-[11px] text-[#755c2e]">${escapeHtml(r.partialPairTip)}</div>`);
         }
         if (r.shortWindowWarning) {
-          teeParts.push(`<div class="text-[10px] text-amber-700 font-semibold">⚠ Kort venster (&lt; ${r.holes === 18 ? '4' : '2'}u)</div>`);
+          teeParts.push(`<div class="text-[11px] text-[#755c2e]">Kort venster (&lt; ${r.holes === 18 ? '4' : '2'}u)</div>`);
         }
         if (r.weatherOverlap && r.weatherOverlap.possible && scoreMetaFn) {
           teeParts.push(`
-            <div class="inline-flex flex-wrap items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-900 border border-emerald-200">
-              <span>⛳ ${escapeHtml(r.weatherOverlap.label)}</span>
-              <span class="font-mono-score font-bold px-1 rounded text-white" style="background-color:${scoreMetaFn(r.weatherOverlap.score).hex}">${r.weatherOverlap.score}</span>
-              <span class="text-stone-500 font-normal">(licht tot ${r.weatherOverlap.lightUntil})</span>
+            <div class="text-[11px] text-[#163828] font-medium">
+              ${escapeHtml(r.weatherOverlap.label)} · <span class="font-mono-score">${r.weatherOverlap.score}</span>
             </div>
           `);
         } else if (r.weatherOverlap && !r.weatherOverlap.possible) {
-          teeParts.push(`<div class="text-[10px] text-amber-800 font-medium">🌙 ${escapeHtml(r.weatherOverlap.reason)}</div>`);
+          teeParts.push(`<div class="text-[11px] text-[#66706a]">${escapeHtml(r.weatherOverlap.reason)}</div>`);
         }
       } else if (r.singleAvailNote) {
-        teeParts.push(`<div class="text-[11px] text-stone-400 font-medium">${escapeHtml(r.singleAvailNote)}</div>`);
+        teeParts.push(`<div class="text-[11px] text-[#66706a]">${escapeHtml(r.singleAvailNote)}</div>`);
       }
       if (r.drNote) {
-        teeParts.push(`<div class="text-[10px] text-purple-800 font-medium">${escapeHtml(r.drNote)}</div>`);
+        teeParts.push(`<div class="text-[11px] text-[#4a3761]">${escapeHtml(r.drNote)}</div>`);
       }
 
       const teeHtml = teeParts.length > 0
-        ? `<div class="space-y-1">${teeParts.join('')}</div>`
-        : `<span class="text-stone-300">—</span>`;
+        ? `<div class="space-y-0.5">${teeParts.join('')}</div>`
+        : `<span class="text-[#918b80]">—</span>`;
 
-      // Booker cel (kolom H)
+      // Booker cel (klikbaar om handmatig aan te passen of opnieuw te loten)
+      const bookerAria = r.bookerMember
+        ? `Booker op ${r.dateMeta.weekdayLong} ${r.dateMeta.dateShort}: ${r.bookerMember.name} (${r.bookerManual ? 'handmatig gekozen' : 'eerlijk geloot'}), klik om te wijzigen`
+        : '';
       const bookerHtml = r.bookerMember
-        ? `<span class="inline-flex items-center px-2 py-1 rounded-lg bg-[#f2efe7] border border-[#d6cfc0] text-[#163828] font-bold text-[11px] whitespace-nowrap">${escapeHtml(r.bookerMember.name)}</span>`
-        : `<span class="text-stone-300">—</span>`;
+        ? `
+          <button type="button"
+            data-edit-booker="${r.dateIso}"
+            aria-label="${escapeHtml(bookerAria)}"
+            class="avail-cell-btn bg-[#faf9f5] border-[#e6e3db] hover:border-[#163828] text-[#18241e] font-medium whitespace-nowrap flex items-center justify-between gap-1.5">
+            <span class="truncate">${escapeHtml(r.bookerMember.name)}</span>
+            <span class="text-[10px] text-[#66706a] shrink-0" aria-hidden="true">${r.bookerManual ? '✎' : '🎲'}</span>
+          </button>
+        `
+        : `<span class="text-[#918b80]">—</span>`;
 
-      // Confirmed cel (kolom I + notitie J)
+      // Confirmed cel
       const suggestedTee = r.weatherOverlap?.possible
         ? r.weatherOverlap.bestStartStr
         : (r.hasOverlap && r.overlapStart !== null ? minsToHHMM(r.overlapStart) : '');
@@ -1058,23 +1260,23 @@ function upsertRow(item) {
           data-edit-confirm="${r.dateIso}"
           data-suggested-tee="${escapeHtml(suggestedTee)}"
           aria-label="${escapeHtml(confirmAria)}"
-          class="avail-cell-btn ${r.confirmed ? 'bg-[#163828] text-white border-[#c5a059] font-bold' : 'avail-empty'}">
+          class="avail-cell-btn ${r.confirmed ? 'bg-[#163828] text-white font-medium' : 'avail-empty'}">
           ${r.confirmed
             ? `<span class="font-mono-score block">✓ ${escapeHtml(r.confirmed)}</span>`
-            : `<span class="block text-[11px]">${r.potentieel ? '+ Bevestig' : '+ Notitie'}</span>`}
-          ${r.note ? `<span class="block text-[10px] ${r.confirmed ? 'text-[#e7cf9b]' : 'text-stone-600'} truncate mt-0.5">📝 ${escapeHtml(r.note)}</span>` : ''}
+            : `<span class="block text-[11px] ${!r.potentieel ? 'text-center' : ''}">${r.potentieel ? 'Bevestig' : '+'}</span>`}
+          ${r.note ? `<span class="block text-[10px] ${r.confirmed ? 'text-[#d3e2d9]' : 'text-[#535d57]'} truncate mt-0.5">${escapeHtml(r.note)}</span>` : ''}
         </button>
       `;
 
       return `
         <tr data-planner-date="${r.dateIso}" class="${rowClasses}">
           <th scope="row">
-            <div class="flex items-center justify-between gap-1">
+            <div class="flex items-baseline justify-between gap-1.5">
               <div>
-                <div class="text-xs font-bold text-[#163828]">${r.dateMeta.displayDay}</div>
-                <div class="text-[11px] text-stone-500 font-normal">${r.dateMeta.dateShort}${r.dateMeta.isWeekend ? ' • Weekend' : ''}</div>
+                <div class="text-xs font-semibold text-[#18241e]">${r.dateMeta.displayDay}</div>
+                <div class="text-[11px] text-[#66706a] font-normal">${r.dateMeta.dateShort}</div>
               </div>
-              ${r.dateMeta.isToday ? '<span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-[#c5a059] text-[#163828]">Nu</span>' : ''}
+              ${r.dateMeta.isToday ? '<span class="text-[10px] font-medium text-[#755c2e]">Nu</span>' : ''}
             </div>
             ${dateWeatherChip}
           </th>
@@ -1094,6 +1296,15 @@ function upsertRow(item) {
           mode: 'member',
           dateIso: btn.dataset.editDate,
           memberKey: btn.dataset.editMember
+        });
+      });
+    });
+
+    tbody.querySelectorAll('button[data-edit-booker]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openAvailEditor({
+          mode: 'booker',
+          dateIso: btn.dataset.editBooker
         });
       });
     });
@@ -1166,6 +1377,75 @@ function upsertRow(item) {
     updateRawParsePreview();
   }
 
+  function renderBookerModalOptions() {
+    const ctx = plannerState.editorContext;
+    const container = el('bookerMemberOptions');
+    const explainEl = el('bookerModalExplain');
+    const badgeEl = el('bookerModeBadge');
+    const rerollBtn = el('btnRerollBooker');
+    if (!ctx || ctx.mode !== 'booker' || !container) return;
+
+    const candidates = ctx.candidates || [];
+    const fairPool = ctx.fairPool || [];
+    const credits = ctx.creditsBeforeDay || {};
+    const selectedKey = ctx.selectedBookerKey || '';
+    const isManual = Boolean(ctx.selectedBookerManual);
+
+    if (explainEl) {
+      const fairNames = fairPool.map(m => m.name).join(' & ');
+      explainEl.textContent = fairPool.length > 1
+        ? `Gelijke stand bij de aanwezigen (${fairNames}). De booker wordt willekeurig uit hen geloot en vastgelegd, of kies hieronder zelf een aanwezige speler.`
+        : `Op basis van de eerdere boekingen is ${fairNames || 'deze speler'} aan de beurt. Je kunt de booker hieronder handmatig wijzigen naar een andere aanwezige speler.`;
+    }
+
+    if (badgeEl) {
+      badgeEl.textContent = isManual ? 'Handmatig gekozen' : 'Eerlijk & random geloot';
+    }
+
+    if (rerollBtn) {
+      rerollBtn.disabled = fairPool.length === 0;
+    }
+
+    container.innerHTML = MEMBERS.map(m => {
+      const isPresent = candidates.some(c => c.key === m.key);
+      const isSelected = m.key === selectedKey;
+      const isFair = fairPool.some(c => c.key === m.key);
+      const cCount = credits[m.key] || 0;
+
+      if (!isPresent) {
+        return `
+          <button type="button" disabled
+            class="px-2.5 py-2.5 rounded-lg border border-[#e6e3db] bg-[#f6f5f0] text-[#918b80] text-center opacity-65 cursor-not-allowed">
+            <div class="font-medium text-xs">${escapeHtml(m.name)}</div>
+            <div class="text-[10px] mt-0.5">Niet aanwezig</div>
+          </button>
+        `;
+      }
+
+      return `
+        <button type="button" data-pick-booker="${m.key}" aria-pressed="${String(isSelected)}"
+          class="px-2.5 py-2.5 rounded-lg border text-center transition cursor-pointer ${
+            isSelected
+              ? 'bg-[#163828] text-white border-[#163828] font-semibold'
+              : 'bg-white text-[#18241e] border-[#d6cfc0] hover:border-[#163828]'
+          }">
+          <div class="text-xs">${escapeHtml(m.name)}</div>
+          <div class="font-mono-score text-[10px] mt-0.5 ${isSelected ? 'text-[#d3e2d9]' : 'text-[#66706a]'}">
+            ${cCount}&times; geboekt${isFair ? ' · aan de beurt' : ''}
+          </div>
+        </button>
+      `;
+    }).join('');
+
+    container.querySelectorAll('button[data-pick-booker]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ctx.selectedBookerKey = btn.dataset.pickBooker;
+        ctx.selectedBookerManual = true;
+        renderBookerModalOptions();
+      });
+    });
+  }
+
   function openAvailEditor(ctx) {
     const dialog = el('availEditorDialog');
     if (!dialog) return;
@@ -1175,19 +1455,23 @@ function upsertRow(item) {
 
     const todayIso = getAmsterdamTodayIso();
     const dateMeta = formatDateMeta(ctx.dateIso, todayIso);
-    const existing = plannerState.rowsByDate[ctx.dateIso] || { tom: '', jeff: '', ed: '', confirmed: '', note: '' };
+    const existing = plannerState.rowsByDate[ctx.dateIso] || { tom: '', jeff: '', ed: '', booker: '', bookerManual: false, confirmed: '', note: '' };
 
     const memberFields = el('availMemberFields');
     const confirmFields = el('availConfirmFields');
+    const bookerFields = el('availBookerFields');
     const titleEl = el('availEditorTitle');
     const subEl = el('availEditorSubtitle');
+
+    memberFields?.classList.add('hidden');
+    confirmFields?.classList.add('hidden');
+    bookerFields?.classList.add('hidden');
 
     if (ctx.mode === 'member') {
       const member = MEMBERS.find(m => m.key === ctx.memberKey);
       if (titleEl) titleEl.textContent = `${member ? member.name : ''} — Beschikbaarheid`;
       if (subEl) subEl.textContent = `${dateMeta.weekdayLong} ${dateMeta.dateShort} (${ctx.dateIso})`;
       memberFields?.classList.remove('hidden');
-      confirmFields?.classList.add('hidden');
       el('timeBuilderInputs')?.classList.add('hidden');
 
       const input = el('availRawInput');
@@ -1195,16 +1479,32 @@ function upsertRow(item) {
         input.value = existing[ctx.memberKey] || '';
       }
       updateRawParsePreview();
+    } else if (ctx.mode === 'booker') {
+      const schedule = buildComputedSchedule();
+      const row = schedule.rows.find(r => r.dateIso === ctx.dateIso);
+      const candidates = row
+        ? ((row.potentieel && row.hasOverlap) ? row.availMembers : row.allAvailMembers)
+        : [];
+      ctx.candidates = candidates;
+      ctx.fairPool = row ? row.bookerFairPool : [];
+      ctx.creditsBeforeDay = row ? row.creditsBeforeDay : {};
+      ctx.selectedBookerKey = row?.bookerMember?.key || '';
+      ctx.selectedBookerManual = Boolean(row?.bookerManual);
+
+      if (titleEl) titleEl.textContent = 'Booker kiezen of loten';
+      if (subEl) subEl.textContent = `${dateMeta.weekdayLong} ${dateMeta.dateShort} (${ctx.dateIso})`;
+      bookerFields?.classList.remove('hidden');
+      renderBookerModalOptions();
     } else {
       if (titleEl) titleEl.textContent = 'Bevestigde Tee Time & Notitie';
       if (subEl) subEl.textContent = `${dateMeta.weekdayLong} ${dateMeta.dateShort} (${ctx.dateIso})`;
-      memberFields?.classList.add('hidden');
       confirmFields?.classList.remove('hidden');
 
       const confirmInput = el('confirmTimeInput');
       const noteInput = el('confirmNoteInput');
       const suggestBtn = el('btnUseSuggestedTee');
       const bookerHint = el('confirmBookerHint');
+      const bookingLinksEl = el('confirmBookingLinks');
 
       if (confirmInput) confirmInput.value = existing.confirmed || '';
       if (noteInput) noteInput.value = existing.note || '';
@@ -1219,11 +1519,22 @@ function upsertRow(item) {
         }
       }
 
+      const schedule = buildComputedSchedule();
+      const row = schedule.rows.find(r => r.dateIso === ctx.dateIso);
+
+      if (bookingLinksEl) {
+        const html = renderBookingLinksHtml(ctx.dateIso, row?.hasOverlap ? row.overlapEnd : null, 'modal');
+        if (html) {
+          bookingLinksEl.innerHTML = html;
+          bookingLinksEl.classList.remove('hidden');
+        } else {
+          bookingLinksEl.classList.add('hidden');
+        }
+      }
+
       if (bookerHint) {
-        const schedule = buildComputedSchedule();
-        const row = schedule.rows.find(r => r.dateIso === ctx.dateIso);
         bookerHint.textContent = row && row.bookerMember
-          ? `Booker volgens eerlijke rotatie: ${row.bookerMember.name} (telt +1 zodra starttijd is ingevuld).`
+          ? `Booker: ${row.bookerMember.name} (${row.bookerManual ? 'handmatig gekozen' : 'eerlijk & willekeurig geloot'}) — telt +1 bij bevestiging.`
           : 'Vul een bevestigde starttijd in zodra de tee time geboekt is.';
       }
     }
@@ -1231,6 +1542,8 @@ function upsertRow(item) {
     dialog.showModal();
     if (ctx.mode === 'confirm') {
       el('confirmTimeInput')?.focus();
+    } else if (ctx.mode === 'booker') {
+      el('bookerMemberOptions')?.querySelector('button:not([disabled])')?.focus();
     } else {
       el('availRawInput')?.focus();
     }
@@ -1242,9 +1555,13 @@ function upsertRow(item) {
     const urlInput = el('sheetWebAppUrl');
     const preview = el('appsScriptPreview');
     const statusBox = el('sheetSyncModalStatus');
+    const shareConnectBtn = el('btnCopyShareConnectLink');
     if (urlInput) urlInput.value = plannerState.sheetUrl || '';
     if (preview) preview.textContent = APPS_SCRIPT_CODE;
     if (statusBox) statusBox.classList.add('hidden');
+    if (shareConnectBtn) {
+      shareConnectBtn.classList.toggle('hidden', !plannerState.sheetUrl);
+    }
     dialog.showModal();
   }
 
@@ -1252,11 +1569,11 @@ function upsertRow(item) {
     const box = el('sheetSyncModalStatus');
     if (!box) return;
     const tones = {
-      success: 'bg-emerald-50 text-emerald-900 border-emerald-200',
-      info: 'bg-amber-50 text-amber-900 border-amber-200',
-      error: 'bg-rose-50 text-rose-900 border-rose-200'
+      success: 'bg-[#f1f6f3] text-[#1b4332] border-[#c7dcd0]',
+      info: 'bg-[#faf7ef] text-[#5c4518] border-[#e3d6b8]',
+      error: 'bg-[#faf4f4] text-[#592629] border-[#dfc5c7]'
     };
-    box.className = `rounded-xl px-3 py-2 text-xs font-medium border ${tones[tone] || tones.info}`;
+    box.className = `rounded-lg px-3 py-2 text-xs font-medium border ${tones[tone] || tones.info}`;
     box.textContent = msg;
     box.classList.remove('hidden');
   }
@@ -1317,6 +1634,7 @@ function upsertRow(item) {
         plannerState.activeMember = btn.dataset.member;
         saveLocalData();
         renderPlanner();
+        window.GolfWeerApp?.refreshSingleCourse?.();
       });
     });
 
@@ -1379,11 +1697,28 @@ function upsertRow(item) {
       showSyncModalMessage('Verbinding testen en planning ophalen...', 'info');
       const ok = await pullFromGoogleSheet(true);
       if (ok) {
-        showSyncModalMessage('Gekoppeld! Alle wijzigingen synchroniseren nu live met tabblad "Huidig".', 'success');
-        setTimeout(() => el('sheetSyncDialog')?.close(), 900);
+        el('btnCopyShareConnectLink')?.classList.remove('hidden');
+        showSyncModalMessage('Gekoppeld! Alle wijzigingen synchroniseren nu live met tabblad "Huidig". Gebruik eventueel de koppel-link hieronder voor Tom & Ed.', 'success');
       } else {
         showSyncModalMessage('Verbinding mislukt. Controleer of de Web-app is gedeployed met toegang "Iedereen".', 'error');
       }
+    });
+
+    el('btnCopyShareConnectLink')?.addEventListener('click', async () => {
+      if (!plannerState.sheetUrl) return;
+      const base = window.location.origin && window.location.origin !== 'null'
+        ? window.location.origin + window.location.pathname
+        : window.location.href.split(/[?#]/)[0];
+      const shareUrl = `${base}#sheet=${encodeURIComponent(plannerState.sheetUrl)}`;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(shareUrl);
+          showSyncModalMessage('Directe koppel-link gekopieerd! Als Tom of Ed deze link opent, is hun browser meteen gekoppeld aan de Google Sheet.', 'success');
+          return;
+        }
+      } catch (e) {}
+      const ok = window.GolfWeerApp?.copyTextFallback?.(shareUrl);
+      showSyncModalMessage(ok ? 'Directe koppel-link gekopieerd!' : 'Kon link niet automatisch kopiëren.', ok ? 'success' : 'error');
     });
 
     el('btnDisconnectSheet')?.addEventListener('click', () => {
@@ -1392,6 +1727,7 @@ function upsertRow(item) {
       saveLocalData();
       updateSyncPillUi();
       if (el('sheetWebAppUrl')) el('sheetWebAppUrl').value = '';
+      el('btnCopyShareConnectLink')?.classList.add('hidden');
       showSyncModalMessage('Google Sheet-koppeling verbroken. De planner werkt nu lokaal in je browser.', 'info');
     });
 
@@ -1400,6 +1736,7 @@ function upsertRow(item) {
       plannerState.baseCredits = { ...DEFAULT_BASE_CREDITS };
       saveLocalData();
       renderPlanner();
+      window.GolfWeerApp?.refreshSingleCourse?.();
       showSyncModalMessage('Planning hersteld naar de laatste voorgeladen Sheet-snapshot.', 'success');
     });
 
@@ -1465,30 +1802,70 @@ function upsertRow(item) {
       if (el('confirmTimeInput')) el('confirmTimeInput').value = '';
     });
 
+    el('btnRerollBooker')?.addEventListener('click', () => {
+      const ctx = plannerState.editorContext;
+      if (!ctx || ctx.mode !== 'booker') return;
+      const pool = ctx.fairPool || [];
+      if (pool.length === 0) return;
+      const picked = pool[Math.floor(Math.random() * pool.length)];
+      ctx.selectedBookerKey = picked.key;
+      ctx.selectedBookerManual = false;
+      renderBookerModalOptions();
+    });
+
     // Opslaan vanuit editor dialog
     el('availEditorForm')?.addEventListener('submit', (e) => {
       e.preventDefault();
       const ctx = plannerState.editorContext;
       if (!ctx) return;
 
-      const current = plannerState.rowsByDate[ctx.dateIso] || { tom: '', jeff: '', ed: '', confirmed: '', note: '' };
+      const current = plannerState.rowsByDate[ctx.dateIso] || { tom: '', jeff: '', ed: '', booker: '', bookerManual: false, confirmed: '', note: '' };
 
       if (ctx.mode === 'member') {
+        const prevBooker = normalizeBookerKey(current.booker);
         const val = (el('availRawInput')?.value || '').trim();
         current[ctx.memberKey] = val;
         plannerState.rowsByDate[ctx.dateIso] = current;
         saveLocalData();
         el('availEditorDialog')?.close();
         renderPlanner();
+        window.GolfWeerApp?.refreshSingleCourse?.();
 
+        const updatedBooker = normalizeBookerKey(plannerState.rowsByDate[ctx.dateIso]?.booker);
         const m = MEMBERS.find(x => x.key === ctx.memberKey);
         showPlannerStatus(`${m ? m.name : ''} op ${ctx.dateIso} bijgewerkt${val ? `: "${val}"` : ' (leeggemaakt)'}.`, 'success');
+
+        const payload = {
+          action: 'upsertRow',
+          date: ctx.dateIso,
+          [ctx.memberKey]: val
+        };
+        if (updatedBooker !== prevBooker) {
+          payload.booker = memberNameByKey(updatedBooker);
+        }
+        pushUpdateToGoogleSheet(payload);
+      } else if (ctx.mode === 'booker') {
+        const chosenKey = normalizeBookerKey(ctx.selectedBookerKey);
+        if (!chosenKey) return;
+        current.booker = chosenKey;
+        current.bookerManual = Boolean(ctx.selectedBookerManual);
+        plannerState.rowsByDate[ctx.dateIso] = current;
+        saveLocalData();
+        el('availEditorDialog')?.close();
+        renderPlanner();
+        window.GolfWeerApp?.refreshSingleCourse?.();
+
+        const chosenName = memberNameByKey(chosenKey);
+        showPlannerStatus(
+          `Booker op ${ctx.dateIso} vastgelegd op ${chosenName}${current.bookerManual ? ' (handmatig)' : ' (eerlijk geloot)'}.`,
+          'success'
+        );
 
         pushUpdateToGoogleSheet({
           action: 'updateCell',
           date: ctx.dateIso,
-          field: ctx.memberKey,
-          value: val
+          field: 'booker',
+          value: chosenName
         });
       } else {
         const confirmedVal = (el('confirmTimeInput')?.value || '').trim();
@@ -1499,30 +1876,86 @@ function upsertRow(item) {
         saveLocalData();
         el('availEditorDialog')?.close();
         renderPlanner();
+        window.GolfWeerApp?.refreshSingleCourse?.();
 
         showPlannerStatus(
           confirmedVal ? `Tee time op ${ctx.dateIso} bevestigd om ${confirmedVal}!` : `Notitie voor ${ctx.dateIso} bijgewerkt.`,
           'success'
         );
 
-        pushUpdateToGoogleSheet({
+        const lockedBooker = normalizeBookerKey(plannerState.rowsByDate[ctx.dateIso]?.booker);
+        const payload = {
           action: 'upsertRow',
           date: ctx.dateIso,
           confirmed: confirmedVal,
           note: noteVal
-        });
+        };
+        if (confirmedVal && lockedBooker) {
+          payload.booker = memberNameByKey(lockedBooker);
+        }
+        pushUpdateToGoogleSheet(payload);
       }
     });
 
     // Publieke hook voor app.js
     window.SwingersPlanner = {
       render: renderPlanner,
-      onWeatherOrSettingsUpdated: renderPlanner
+      getScheduleMapByDate() {
+        const schedule = buildComputedSchedule();
+        const byDate = {};
+        schedule.rows.forEach(r => {
+          byDate[r.dateIso] = r;
+        });
+        return {
+          byDate,
+          members: MEMBERS,
+          activeMember: plannerState.activeMember
+        };
+      },
+      openEditor(ctx) {
+        openAvailEditor(ctx);
+      },
+      jumpToDate(dateIso) {
+        if (plannerState.filter !== 'all') {
+          plannerState.filter = 'all';
+          const filterSelect = el('plannerFilterSelect');
+          if (filterSelect) filterSelect.value = 'all';
+        }
+        window.GolfWeerApp?.setViewMode?.('planner', true);
+        requestAnimationFrame(() => {
+          const tr = document.querySelector(`tr[data-planner-date="${dateIso}"]`);
+          if (tr) {
+            tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            tr.classList.add('pulse-gold');
+            setTimeout(() => tr.classList.remove('pulse-gold'), 1400);
+          }
+        });
+      },
+      onWeatherOrSettingsUpdated() {
+        renderPlanner();
+        if (window.GolfWeerApp?.state?.viewMode === 'planner') {
+          maybeAutoPullFromSheet();
+        }
+      }
     };
 
+    // Automatisch koppelen wanneer iemand een gedeelde #sheet=... link opent
+    const connectedFromUrl = importSheetUrlFromLocation();
+
+    // Automatisch verversen wanneer je terugkeert naar dit browsertabblad
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        maybeAutoPullFromSheet();
+      }
+    });
+
     renderPlanner();
+    window.GolfWeerApp?.refreshSingleCourse?.();
     if (plannerState.sheetUrl) {
-      pullFromGoogleSheet(true);
+      pullFromGoogleSheet(!connectedFromUrl);
+      if (connectedFromUrl) {
+        window.GolfWeerApp?.setViewMode?.('planner', true);
+      }
     }
   }
 
