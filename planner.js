@@ -6,6 +6,7 @@
 
   const STORAGE_KEY_ROWS = 'swingersclub_rows_v1';
   const STORAGE_KEY_META = 'swingersclub_meta_v1';
+  const STORAGE_KEY_PRESENCE_MIGRATED = 'swingersclub_presence_migrated_v1';
 
   const MEMBERS = [
     { key: 'tom', name: 'Tom 🦩', shortName: 'Tom' },
@@ -17,28 +18,50 @@
   const DEFAULT_BASE_CREDITS = { tom: 3, jeff: 3, ed: 3 };
 
   // Actuele voorgeladen planning uit tabblad "Huidig" van Swingersclub E.v.
+  // Aangepast naar aanwezigheid op de golfclub (oude eindtijden 'tot'/'tussen' +2 uur voor 9 holes).
   const SEED_SHEET_ROWS = {
-    '2026-11-23': { tom: 'x', jeff: 'hele dag', ed: '', confirmed: '', note: '' },
-    '2026-11-24': { tom: 'x', jeff: 'tot 15:00', ed: '', confirmed: '', note: '' },
-    '2026-11-25': { tom: 'va 20:00 DR', jeff: 'overdag', ed: '', confirmed: '', note: '' },
-    '2026-11-26': { tom: 'va 20:00 DR', jeff: 'tot 16:00', ed: '', confirmed: '', note: '' },
-    '2026-11-27': { tom: 'va 16:00', jeff: 'tot 16:00', ed: '', confirmed: '', note: '' },
-    '2026-11-28': { tom: 'va 12:30', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-11-29': { tom: 'hele dag', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-11-30': { tom: 'x', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-01': { tom: 'va 20:00 DR', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-02': { tom: 'x', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-03': { tom: 'va 20:00 DR', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-04': { tom: 'x', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-05': { tom: 'x', jeff: 'hele dag', ed: '', confirmed: '', note: '' },
-    '2026-12-06': { tom: 'x', jeff: 'hele dag', ed: '', confirmed: '', note: '' },
-    '2026-12-07': { tom: 'x', jeff: 'tot 15:00', ed: '', confirmed: '', note: '' },
-    '2026-12-08': { tom: 'va 15:00', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-09': { tom: 'x', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-10': { tom: 'x', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-11': { tom: 'va 16:00', jeff: 'x', ed: '', confirmed: '', note: '' },
-    '2026-12-12': { tom: 'va 13:00', jeff: 'hele dag', ed: '', confirmed: '', note: '' },
-    '2026-12-13': { tom: '', jeff: 'hele dag', ed: '', confirmed: '', note: '' }
+    '2026-11-23': { tom: 'x', jeff: 'hele dag', ed: 'x', confirmed: '', note: '' },
+    '2026-11-24': { tom: 'x', jeff: 'tot 17:00', ed: 'Tussen 13:00 en 17:00', confirmed: '', note: '' },
+    '2026-11-25': { tom: 'va 20:00 DR', jeff: 'overdag', ed: 'x', confirmed: '', note: '' },
+    '2026-11-26': { tom: 'va 20:00 DR', jeff: 'tot 18:00', ed: 'x', confirmed: '', note: '' },
+    '2026-11-27': { tom: 'va 16:00', jeff: 'tot 18:00', ed: 'x', confirmed: '', note: '' },
+    '2026-11-28': { tom: 'va 12:30', jeff: 'x', ed: 'x', confirmed: '', note: '' },
+    '2026-11-29': { tom: 'hele dag', jeff: 'x', ed: 'Hele dag', confirmed: '', note: '' },
+    '2026-11-30': { tom: 'x', jeff: 'x', ed: 'Tot 17:00', confirmed: '', note: '' },
+    '2026-12-01': { tom: 'va 20:00 DR', jeff: 'x', ed: 'x', confirmed: '', note: '' },
+    '2026-12-02': { tom: 'x', jeff: 'x', ed: 'x', confirmed: '', note: '' },
+    '2026-12-03': { tom: 'va 20:00 DR', jeff: 'x', ed: 'x', confirmed: '', note: '' },
+    '2026-12-04': { tom: 'x', jeff: 'x', ed: 'x', confirmed: '', note: '' },
+    '2026-12-05': { tom: 'x', jeff: 'hele dag', ed: 'x', confirmed: '', note: '' },
+    '2026-12-06': { tom: 'x', jeff: 'hele dag', ed: 'x', confirmed: '', note: '' },
+    '2026-12-07': { tom: 'x', jeff: 'tot 17:00', ed: 'Tot 17:00', confirmed: '', note: '' },
+    '2026-12-08': { tom: 'va 15:00', jeff: 'x', ed: 'Tot 17:00', confirmed: '', note: '' },
+    '2026-12-09': { tom: 'x', jeff: 'x', ed: 'x', confirmed: '', note: '' },
+    '2026-12-10': { tom: 'x', jeff: 'x', ed: 'x', confirmed: '', note: '' },
+    '2026-12-11': { tom: 'va 16:00', jeff: 'x', ed: 'Tot 17:00', confirmed: '', note: '' },
+    '2026-12-12': { tom: 'va 13:00', jeff: 'hele dag', ed: 'Hele dag', confirmed: '', note: '' },
+    '2026-12-13': { tom: '', jeff: 'hele dag', ed: 'x', confirmed: '', note: '' },
+    '2026-12-14': { tom: '', jeff: '', ed: 'Tot 17:00', confirmed: '', note: '' },
+    '2026-12-15': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-16': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-17': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-18': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-19': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-20': { tom: '', jeff: '', ed: 'Hele dag', confirmed: '', note: '' },
+    '2026-12-21': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-22': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-23': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-24': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-25': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-26': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-27': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-28': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-29': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-30': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2026-12-31': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2027-01-01': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2027-01-02': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' },
+    '2027-01-03': { tom: '', jeff: '', ed: 'x', confirmed: '', note: '' }
   };
 
   const APPS_SCRIPT_CODE = `// Plak dit in Google Sheet "Swingersclub E.v." -> Extensies -> Apps Script
@@ -237,6 +260,14 @@ function upsertRow(item) {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
+  function formatGrade(score) {
+    if (window.GolfWeerApp && typeof window.GolfWeerApp.formatWeatherGrade === 'function') {
+      return window.GolfWeerApp.formatWeatherGrade(score);
+    }
+    const num = Math.max(10, Math.min(100, Math.round(Number(score) || 10)));
+    return (num / 10).toFixed(1).replace('.', ',');
+  }
+
   function parseTimeStrToMins(str) {
     const m = String(str).match(/(\d{1,2})[:.](\d{2})/);
     if (!m) return null;
@@ -325,8 +356,10 @@ function upsertRow(item) {
 
     const isMaybe = /misschien/i.test(raw);
 
-    let startMins = 9 * 60;  // 09:00 standaard (net als 9/24 in sheet)
-    let endMins = 20 * 60;   // 20:00 standaard (net als 20/24 in sheet)
+    // Standaard aanwezigheid op de club: 09:00 - 22:00 (zodat bij 9h t/m 20:00 en bij 18h t/m 18:00 gestart kan worden;
+    // binnen de 7-daagse weercheck begrenst het echte schemerlicht dit automatisch!)
+    let startMins = 9 * 60;
+    let endMins = 22 * 60;
     let isFullDay = false;
 
     if (/tussen/i.test(raw) && timeMatches.length >= 2) {
@@ -337,7 +370,7 @@ function upsertRow(item) {
       endMins = timeMatches[1];
     } else if (/(^|\b)(va|vanaf|na)\b/i.test(raw) && timeMatches.length >= 1) {
       startMins = timeMatches[0];
-      endMins = 20 * 60;
+      endMins = 22 * 60;
     } else if (/\btot\b/i.test(raw) && timeMatches.length >= 1) {
       startMins = 9 * 60;
       endMins = timeMatches[0];
@@ -349,15 +382,15 @@ function upsertRow(item) {
       endMins = 20 * 60;
     } else if (/hele\s*dag|overdag|ja/i.test(raw)) {
       startMins = 9 * 60;
-      endMins = 20 * 60;
+      endMins = 22 * 60;
       isFullDay = true;
     } else if (timeMatches.length === 1) {
       startMins = timeMatches[0];
-      endMins = 20 * 60;
+      endMins = 22 * 60;
     } else {
-      // Bijv. "misschien" zonder tijd -> 09:00 - 20:00 (identiek aan sheet)
+      // Bijv. "misschien" zonder tijd -> hele dag aanwezig
       startMins = 9 * 60;
-      endMins = 20 * 60;
+      endMins = 22 * 60;
     }
 
     let cssClass = 'avail-partial';
@@ -518,34 +551,58 @@ function upsertRow(item) {
       const drMembers = MEMBERS.filter(m => parsed[m.key].isDR);
       const count = availMembers.length;
 
-      // Overlap & Potentieel berekening: alleen GO / GOGOGO als er daadwerkelijk overlap is!
+      // Aanwezigheids-overlap -> Mogelijke starttijden (eindtijd minus speelduur: 9h = 2u, 18h = 4u)
+      const formatTeeRange = (pStart, pEnd, durMins) => {
+        const latestTee = pEnd - durMins;
+        if (latestTee < pStart) return null;
+        return latestTee === pStart
+          ? `Afslag ${minsToHHMM(pStart)}`
+          : `${minsToHHMM(pStart)} – ${minsToHHMM(latestTee)}`;
+      };
+
       let potentieel = '';
       let playingMembers = availMembers;
+      let presenceStart = null;
+      let presenceEnd = null;
+      let presenceText = '';
+      let teeStart = null;
+      let teeEnd = null;
       let overlapStart = null;
       let overlapEnd = null;
       let overlapText = '';
+      let shortRoundDetail = '';
       let singleAvailNote = '';
       let hasOverlap = false;
       let partialPairTip = '';
 
       if (count === 1) {
         const solo = availMembers[0];
-        singleAvailNote = `Alleen ${solo.shortName} (${minsToHHMM(parsed[solo.key].startMins)} – ${minsToHHMM(parsed[solo.key].endMins)})`;
+        const sS = parsed[solo.key].startMins;
+        const sE = parsed[solo.key].endMins;
+        const soloTee = formatTeeRange(sS, sE, roundMins);
+        singleAvailNote = soloTee
+          ? `Alleen ${solo.shortName}: start ${soloTee} (aanwezig ${minsToHHMM(sS)} – ${minsToHHMM(sE)})`
+          : `Alleen ${solo.shortName}: aanwezig ${minsToHHMM(sS)} – ${minsToHHMM(sE)} (te kort voor ${holes}h)`;
       } else if (count >= 2) {
         const starts = availMembers.map(m => parsed[m.key].startMins);
         const ends = availMembers.map(m => parsed[m.key].endMins);
         const mS = Math.max(...starts);
         const mE = Math.min(...ends);
 
-        if (mS < mE) {
+        if (mE - mS >= roundMins) {
+          presenceStart = mS;
+          presenceEnd = mE;
+          presenceText = `${minsToHHMM(mS)} – ${minsToHHMM(mE)}`;
+          teeStart = mS;
+          teeEnd = mE - roundMins;
           overlapStart = mS;
           overlapEnd = mE;
-          overlapText = `${minsToHHMM(mS)} – ${minsToHHMM(mE)}`;
+          overlapText = formatTeeRange(mS, mE, roundMins);
           hasOverlap = true;
           potentieel = count === 3 ? 'GOGOGO' : 'GO';
           playingMembers = availMembers;
         } else if (count === 3) {
-          // Geen 3-way overlap: check of er wél een koppel van 2 spelers overlapt
+          // Geen 3-way venster lang genoeg voor de gekozen ronde: check of 2 spelers wél genoeg overlap hebben
           let bestPair = null;
           const pairs = [[0, 1, 2], [0, 2, 1], [1, 2, 0]];
           for (const [i, j, k] of pairs) {
@@ -554,23 +611,47 @@ function upsertRow(item) {
             const c = availMembers[k];
             const pS = Math.max(parsed[a.key].startMins, parsed[b.key].startMins);
             const pE = Math.min(parsed[a.key].endMins, parsed[b.key].endMins);
-            if (pS < pE && (!bestPair || (pE - pS) > (bestPair.end - bestPair.start))) {
+            if ((pE - pS) >= roundMins && (!bestPair || (pE - pS) > (bestPair.end - bestPair.start))) {
               bestPair = { a, b, excluded: c, start: pS, end: pE };
             }
           }
           if (bestPair) {
+            presenceStart = bestPair.start;
+            presenceEnd = bestPair.end;
+            presenceText = `${minsToHHMM(bestPair.start)} – ${minsToHHMM(bestPair.end)}`;
+            teeStart = bestPair.start;
+            teeEnd = bestPair.end - roundMins;
             overlapStart = bestPair.start;
             overlapEnd = bestPair.end;
-            overlapText = `${minsToHHMM(bestPair.start)} – ${minsToHHMM(bestPair.end)}`;
+            overlapText = formatTeeRange(bestPair.start, bestPair.end, roundMins);
             hasOverlap = true;
             potentieel = 'GO';
             playingMembers = [bestPair.a, bestPair.b];
-            partialPairTip = `Alleen ${bestPair.a.shortName} & ${bestPair.b.shortName} (${bestPair.excluded.shortName} overlapt niet)`;
+            partialPairTip = `Alleen ${bestPair.a.shortName} & ${bestPair.b.shortName} (${bestPair.excluded.shortName} past niet bij ${holes}h)`;
+          } else if (mS < mE) {
+            presenceStart = mS;
+            presenceEnd = mE;
+            presenceText = `${minsToHHMM(mS)} – ${minsToHHMM(mE)}`;
+            overlapText = `Te kort voor ${holes} holes`;
+            const alt9 = holes === 18 ? formatTeeRange(mS, mE, 120) : null;
+            shortRoundDetail = alt9
+              ? `Aanwezig ${presenceText} · wel 9 holes: ${alt9}`
+              : `Aanwezig ${presenceText} (${holes}h kost ${holes === 18 ? '4' : '2'}u)`;
           } else {
             overlapText = 'Geen overlap';
           }
+        } else if (mS < mE) {
+          // 2 spelers overlappen wel qua aanwezigheid, maar korter dan de gekozen speelduur
+          presenceStart = mS;
+          presenceEnd = mE;
+          presenceText = `${minsToHHMM(mS)} – ${minsToHHMM(mE)}`;
+          overlapText = `Te kort voor ${holes} holes`;
+          const alt9 = holes === 18 ? formatTeeRange(mS, mE, 120) : null;
+          shortRoundDetail = alt9
+            ? `Aanwezig ${presenceText} · wel 9 holes: ${alt9}`
+            : `Aanwezig ${presenceText} (${holes}h kost ${holes === 18 ? '4' : '2'}u)`;
         } else {
-          // 2 spelers zonder overlap -> geen GO
+          // 2 spelers zonder aanwezigheidsoverlap -> geen GO
           overlapText = 'Geen overlap';
         }
       }
@@ -659,13 +740,19 @@ function upsertRow(item) {
         hasMaybe,
         potentieel,
         hasOverlap,
+        presenceStart,
+        presenceEnd,
+        presenceText,
+        teeStart,
+        teeEnd,
         overlapStart,
         overlapEnd,
         overlapText,
+        shortRoundDetail,
         singleAvailNote,
         drNote,
         partialPairTip,
-        shortWindowWarning,
+        shortWindowWarning: false,
         bookerMember,
         bookerManual,
         bookerFairPool,
@@ -695,6 +782,37 @@ function upsertRow(item) {
   // ============================================================
   // 4. OPSLAG (LOCALSTORAGE) & GOOGLE APPS SCRIPT SYNC
   // ============================================================
+  function shiftLegacyEndTimeToPresence(rawValue) {
+    const raw = String(rawValue || '').trim();
+    if (!raw || /^x(?:\b|[^a-z]|$)/i.test(raw) || /\bdr\b/i.test(raw)) return raw;
+
+    const addTwoHours = (timeToken) => {
+      const sep = timeToken.includes('.') ? '.' : ':';
+      const mins = parseTimeStrToMins(timeToken);
+      if (mins === null) return timeToken;
+      const shifted = Math.min(22 * 60, mins + 120);
+      const hh = String(Math.floor(shifted / 60)).padStart(2, '0');
+      const mm = String(shifted % 60).padStart(2, '0');
+      return `${hh}${sep}${mm}`;
+    };
+
+    // "tussen 13:00 en 15:00" of "13:00-15:00" -> verschuif alleen de 2e (eind)tijd +2u
+    if (/tussen/i.test(raw) || /\d{1,2}[:.]\d{2}\s*(?:[-–]|en|tot)\s*\d{1,2}[:.]\d{2}/i.test(raw)) {
+      let seen = 0;
+      return raw.replace(/\d{1,2}[:.]\d{2}/g, (match) => {
+        seen++;
+        return seen === 2 ? addTwoHours(match) : match;
+      });
+    }
+
+    // "tot 15:00" -> "tot 17:00"
+    if (/\btot\b/i.test(raw)) {
+      return raw.replace(/\d{1,2}[:.]\d{2}/, (match) => addTwoHours(match));
+    }
+
+    return raw;
+  }
+
   function loadLocalData() {
     let savedRows = null;
     try {
@@ -704,8 +822,31 @@ function upsertRow(item) {
 
     if (savedRows && typeof savedRows === 'object' && Object.keys(savedRows).length > 0) {
       plannerState.rowsByDate = savedRows;
+      // Eenmalige migratie voor reeds lokaal opgeslagen tijden (oude tee-time eindtijden +2u -> clubaanwezigheid)
+      let alreadyMigrated = false;
+      try { alreadyMigrated = localStorage.getItem(STORAGE_KEY_PRESENCE_MIGRATED) === '1'; } catch (e) {}
+      if (!alreadyMigrated) {
+        let changed = false;
+        Object.keys(plannerState.rowsByDate).forEach(dateIso => {
+          if (dateIso < '2026-11-23') return;
+          const row = plannerState.rowsByDate[dateIso];
+          if (!row) return;
+          MEMBERS.forEach(m => {
+            if (row[m.key]) {
+              const nextVal = shiftLegacyEndTimeToPresence(row[m.key]);
+              if (nextVal !== row[m.key]) {
+                row[m.key] = nextVal;
+                changed = true;
+              }
+            }
+          });
+        });
+        try { localStorage.setItem(STORAGE_KEY_PRESENCE_MIGRATED, '1'); } catch (e) {}
+        if (changed) saveLocalData();
+      }
     } else {
       plannerState.rowsByDate = JSON.parse(JSON.stringify(SEED_SHEET_ROWS));
+      try { localStorage.setItem(STORAGE_KEY_PRESENCE_MIGRATED, '1'); } catch (e) {}
     }
 
     try {
@@ -901,7 +1042,7 @@ function upsertRow(item) {
     const renderModalItem = (item) => {
       const metaBits = [];
       if (item.isMember) metaBits.push('lid');
-      if (item.weatherScore !== null) metaBits.push(`weer ${item.weatherScore}`);
+      if (item.weatherScore !== null) metaBits.push(`weercijfer ${formatGrade(item.weatherScore)}`);
       if (!item.isOpenNow) metaBits.push(item.openFromLabel);
       else if (item.guestNote) metaBits.push(item.guestNote);
       else if (item.advanceDays) metaBits.push(`nu open (${item.advanceDays}d)`);
@@ -942,7 +1083,7 @@ function upsertRow(item) {
     const renderCompactPill = (item) => {
       const suffixBits = [];
       if (item.isMember) suffixBits.push('lid');
-      if (item.weatherScore !== null) suffixBits.push(String(item.weatherScore));
+      if (item.weatherScore !== null) suffixBits.push(formatGrade(item.weatherScore));
       if (!item.isOpenNow) suffixBits.push(item.openFromLabel);
       else if (item.guestNote) suffixBits.push(item.guestNote);
       const suffix = suffixBits.length ? ` · ${suffixBits.join(', ')}` : '';
@@ -1058,14 +1199,14 @@ function upsertRow(item) {
               const statusBadge = r.confirmed
                 ? `<span class="px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#163828] text-white font-mono-score">Bevestigd ${escapeHtml(r.confirmed)}</span>`
                 : r.potentieel === 'GOGOGO'
-                  ? `<span class="px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#1b5e3d] text-white">GOGOGO</span>`
-                  : `<span class="px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#f9f3e3] text-[#6d5120] border border-[#dec68e]">GO</span>`;
+                  ? `<span class="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#1b5e3d] text-white">GOGOGO</span>`
+                  : `<span class="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#f3e5c0] text-[#4f380d] border border-[#c8a24b]">GO</span>`;
 
               const playersText = r.availMembers.map(m => m.shortName + (r.parsed[m.key].maybe ? '?' : '')).join(' · ');
               const metaParts = [];
               if (r.bookerMember) metaParts.push(`Booker: ${escapeHtml(r.bookerMember.shortName)}`);
               if (r.weatherDay && r.weatherOverlap?.possible) {
-                metaParts.push(`Weer ${r.weatherOverlap.score} · ${escapeHtml(r.weatherOverlap.label)}`);
+                metaParts.push(`Weercijfer ${formatGrade(r.weatherOverlap.score)} · ${escapeHtml(r.weatherOverlap.label)}`);
               } else if (r.weatherOverlap && !r.weatherOverlap.possible) {
                 metaParts.push(escapeHtml(r.weatherOverlap.reason));
               }
@@ -1136,6 +1277,8 @@ function upsertRow(item) {
     tbody.innerHTML = filteredRows.map((r, idx) => {
       const rowClasses = [
         r.dateMeta.isWeekend ? 'planner-row-weekend' : '',
+        (!r.confirmed && r.potentieel === 'GOGOGO' && r.hasOverlap) ? 'planner-row-gogogo' : '',
+        (!r.confirmed && r.potentieel === 'GO' && r.hasOverlap) ? 'planner-row-go' : '',
         r.confirmed ? 'planner-row-confirmed' : '',
         r.dateMeta.isToday ? 'planner-row-today' : '',
         (r.dateMeta.isMonday && idx > 0) ? 'planner-week-sep' : ''
@@ -1149,7 +1292,7 @@ function upsertRow(item) {
           <button type="button" data-jump-weather-day="${r.weatherDay.dayIndex}"
             class="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-mono-score font-medium hover:opacity-85 transition"
             style="${bm.tintStyle}">
-            <span>${r.weatherDay.score}</span>
+            <span>${formatGrade(r.weatherDay.score)}</span>
             <span aria-hidden="true">·</span>
             <span>${r.weatherDay.temp}°</span>
           </button>
@@ -1186,7 +1329,7 @@ function upsertRow(item) {
         `;
       } else if (r.potentieel === 'GO') {
         potHtml = `
-          <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#f9f3e3] text-[#6d5120] border border-[#dec68e]">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#f3e5c0] text-[#4f380d] border border-[#c8a24b]">
             GO
           </span>
           ${r.hasMaybe ? '<div class="text-[10px] text-[#2a4354] mt-0.5">o.v.b.</div>' : ''}
@@ -1199,7 +1342,7 @@ function upsertRow(item) {
         `;
       }
 
-      // Tee time & Weer cel
+      // Starttijden & Weer cel
       let teeParts = [];
       if (r.overlapText) {
         const isNoOverlap = !r.hasOverlap;
@@ -1208,16 +1351,19 @@ function upsertRow(item) {
             ${escapeHtml(r.overlapText)}
           </div>
         `);
+        if (r.hasOverlap && r.presenceText) {
+          teeParts.push(`<div class="text-[10px] text-[#66706a]">Aanwezig ${escapeHtml(r.presenceText)}</div>`);
+        }
+        if (r.shortRoundDetail) {
+          teeParts.push(`<div class="text-[11px] text-[#755c2e]">${escapeHtml(r.shortRoundDetail)}</div>`);
+        }
         if (r.partialPairTip) {
           teeParts.push(`<div class="text-[11px] text-[#755c2e]">${escapeHtml(r.partialPairTip)}</div>`);
-        }
-        if (r.shortWindowWarning) {
-          teeParts.push(`<div class="text-[11px] text-[#755c2e]">Kort venster (&lt; ${r.holes === 18 ? '4' : '2'}u)</div>`);
         }
         if (r.weatherOverlap && r.weatherOverlap.possible && scoreMetaFn) {
           teeParts.push(`
             <div class="text-[11px] text-[#163828] font-medium">
-              ${escapeHtml(r.weatherOverlap.label)} · <span class="font-mono-score">${r.weatherOverlap.score}</span>
+              Weer: ${escapeHtml(r.weatherOverlap.label)} · <span class="font-mono-score">${formatGrade(r.weatherOverlap.score)}</span>
             </div>
           `);
         } else if (r.weatherOverlap && !r.weatherOverlap.possible) {
@@ -1359,20 +1505,27 @@ function upsertRow(item) {
     } else if (p.status === 'dr') {
       preview.textContent = `Resultaat: ${p.summary} (telt niet mee voor GO / GOGOGO of Booker).`;
     } else {
-      preview.textContent = `Resultaat: beschikbaar voor Tee time — ${p.summary}`;
+      const dur = p.endMins - p.startMins;
+      const t9 = dur >= 120
+        ? (dur === 120 ? minsToHHMM(p.startMins) : `${minsToHHMM(p.startMins)}–${minsToHHMM(p.endMins - 120)}`)
+        : 'te kort';
+      const t18 = dur >= 240
+        ? (dur === 240 ? minsToHHMM(p.startMins) : `${minsToHHMM(p.startMins)}–${minsToHHMM(p.endMins - 240)}`)
+        : 'te kort';
+      preview.textContent = `Aanwezig ${p.summary} → starten 9h: ${t9} · 18h: ${t18}`;
     }
   }
 
   function applyTimeBuilderToInput() {
     const mode = plannerState.activeTimeMode;
-    const startVal = el('availTimeStart')?.value || '13:00';
-    const endVal = el('availTimeEnd')?.value || '16:00';
+    const startVal = el('availTimeStart')?.value || '12:00';
+    const endVal = el('availTimeEnd')?.value || '18:00';
     const input = el('availRawInput');
     if (!input || !mode) return;
 
     if (mode === 'va') input.value = `va ${startVal}`;
     else if (mode === 'tot') input.value = `tot ${endVal}`;
-    else if (mode === 'tussen') input.value = `tussen ${startVal} en ${endVal}`;
+    else if (mode === 'tussen') input.value = `${startVal}-${endVal}`;
     else if (mode === 'dr') input.value = `va ${startVal} DR`;
     updateRawParsePreview();
   }
@@ -1606,9 +1759,9 @@ function upsertRow(item) {
         const players = r.availMembers.map(m => m.name + (r.parsed[m.key].maybe ? '?' : '')).join(', ');
         let extra = '';
         if (r.weatherOverlap?.possible) {
-          extra = ` | Weer ${r.weatherOverlap.score}/100 (${r.weatherOverlap.label})`;
+          extra = ` | Weercijfer ${formatGrade(r.weatherOverlap.score)} (${r.weatherOverlap.label})`;
         } else if (r.weatherDay) {
-          extra = ` | Weer ${r.weatherDay.score}/100`;
+          extra = ` | Weercijfer ${formatGrade(r.weatherDay.score)}`;
         }
         const bookerTxt = r.bookerMember ? ` | Booker: ${r.bookerMember.name}` : '';
         lines.push(`• *${r.dateMeta.displayDay} ${r.dateMeta.dateShort}* [${r.potentieel}] ${r.overlapText} (${players})${extra}${bookerTxt}`);

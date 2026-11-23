@@ -410,7 +410,7 @@ function calculateHourlyGolfScore(hourIdx, hourly, course, pref) {
   const frostPenalty = temp <= 1.5 ? 8 : 0;
 
   const totalPenalty = rainPenalty + wetPenalty + windPenalty + coldPenalty + heatPenalty + frostPenalty;
-  const score = Math.max(5, Math.min(99, Math.round(100 - totalPenalty)));
+  const score = Math.max(10, Math.min(100, Math.round(100 - totalPenalty)));
 
   return {
     score,
@@ -425,32 +425,41 @@ function calculateHourlyGolfScore(hourIdx, hourly, course, pref) {
   };
 }
 
+function formatWeatherGrade(score) {
+  const num = Math.max(10, Math.min(100, Math.round(Number(score) || 10)));
+  return (num / 10).toFixed(1).replace('.', ',');
+}
+
+function formatPenaltyGrade(pts) {
+  return (Math.max(0.1, Math.round(pts) / 10)).toFixed(1).replace('.', ',');
+}
+
 /**
- * Bouwt een compacte 1-regelige uitleg waarom de score van een dag is zoals hij is.
+ * Bouwt een compacte 1-regelige uitleg waarom het weercijfer van een dag is zoals het is.
  */
 function buildScoreReason(avgPenalties, rep, bestScore) {
   const items = [];
 
   if (avgPenalties.rain >= 3.5) {
     const label = rep.precip >= 0.4 || rep.prob >= 60 ? 'Regen' : 'Kans op buien';
-    items.push({ pts: avgPenalties.rain, text: `${label} (-${Math.round(avgPenalties.rain)})` });
+    items.push({ pts: avgPenalties.rain, text: `${label} (-${formatPenaltyGrade(avgPenalties.rain)})` });
   }
   if (avgPenalties.wind >= 3.5) {
     const label = rep.wind >= 22 || rep.gusts >= 35 ? 'Stevige wind' : 'Wind';
-    items.push({ pts: avgPenalties.wind, text: `${label} (-${Math.round(avgPenalties.wind)})` });
+    items.push({ pts: avgPenalties.wind, text: `${label} (-${formatPenaltyGrade(avgPenalties.wind)})` });
   }
   if (avgPenalties.cold >= 3.5) {
     const label = rep.appTemp <= 5 ? 'Koud' : 'Fris';
-    items.push({ pts: avgPenalties.cold, text: `${label} (-${Math.round(avgPenalties.cold)})` });
+    items.push({ pts: avgPenalties.cold, text: `${label} (-${formatPenaltyGrade(avgPenalties.cold)})` });
   }
   if (avgPenalties.heat >= 3.5) {
-    items.push({ pts: avgPenalties.heat, text: `Warm (-${Math.round(avgPenalties.heat)})` });
+    items.push({ pts: avgPenalties.heat, text: `Warm (-${formatPenaltyGrade(avgPenalties.heat)})` });
   }
   if (avgPenalties.frost >= 3.5) {
-    items.push({ pts: avgPenalties.frost, text: `Kans op rijp (-${Math.round(avgPenalties.frost)})` });
+    items.push({ pts: avgPenalties.frost, text: `Kans op rijp (-${formatPenaltyGrade(avgPenalties.frost)})` });
   }
   if (avgPenalties.wet >= 3.0) {
-    items.push({ pts: avgPenalties.wet, text: `Natte baan (-${Math.round(avgPenalties.wet)})` });
+    items.push({ pts: avgPenalties.wet, text: `Natte baan (-${formatPenaltyGrade(avgPenalties.wet)})` });
   }
 
   items.sort((a, b) => b.pts - a.pts);
@@ -928,16 +937,21 @@ function renderApp() {
   }
 }
 
+function playersMiniSvg(sizeClass = 'w-3 h-3') {
+  return `<svg class="${sizeClass} shrink-0" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0"/><circle cx="16.5" cy="9.5" r="2.25"/><path d="M16 14.5a4.25 4.25 0 014.5 4.5"/></svg>`;
+}
+
 function buildCollapsedPlannerBadgeHtml(plannerRow) {
   if (!plannerRow) return '';
+  const names = (plannerRow.availMembers || []).map(m => m.shortName).join(' & ');
   if (plannerRow.confirmed) {
-    return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#163828] text-white font-mono-score">Bevestigd ${escapeHtml(plannerRow.confirmed)}</span>`;
+    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#163828] text-white font-mono-score">${playersMiniSvg()}✓ ${escapeHtml(plannerRow.confirmed)}${names ? ` · ${escapeHtml(names)}` : ''}</span>`;
   }
   if (plannerRow.potentieel === 'GOGOGO') {
-    return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#1b5e3d] text-white">3/3 GO</span>`;
+    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#1b5e3d] text-white">${playersMiniSvg()}3/3 GOGOGO</span>`;
   }
   if (plannerRow.potentieel === 'GO') {
-    return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-[#f9f3e3] text-[#6d5120] border border-[#dec68e]">2/3 GO</span>`;
+    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#f3e5c0] text-[#4f380d] border border-[#c8a24b]">${playersMiniSvg()}2/3 GO${names ? ` · ${escapeHtml(names)}` : ''}</span>`;
   }
   return '';
 }
@@ -982,7 +996,7 @@ function buildDaylightVisualHtml(d, plannerRow) {
       if (oRight > oLeft) {
         barHtml += `
           <div class="overlap-timeline-bar overlap-timeline-bar-go" style="left:${oLeft.toFixed(2)}%;width:${Math.max(8, oRight - oLeft).toFixed(2)}%;">
-            ${escapeHtml(playersLabel)} · ${escapeHtml(plannerRow.overlapText)}
+            ${escapeHtml(playersLabel)} · start ${escapeHtml(plannerRow.overlapText)}
           </div>
         `;
       }
@@ -1043,7 +1057,7 @@ function buildDaylightVisualHtml(d, plannerRow) {
           <span>${String(r.hour).padStart(2, '0')}u</span>${inBest ? '<span class="text-[#b89652] ml-0.5" aria-hidden="true">★</span>' : ''}
           <span class="visually-hidden">${phaseMeta.label}${inBest ? ', beste speelvenster' : ''}</span>
         </div>
-        <div class="font-mono-score text-xs font-semibold py-0.5 px-1 rounded border" style="${hb.tintStyle}">${r.score}</div>
+        <div class="font-mono-score text-[11px] font-semibold py-0.5 px-0.5 rounded border whitespace-nowrap" style="${hb.tintStyle}">${formatWeatherGrade(r.score)}</div>
         <div class="text-[10px] font-mono-score mt-1">${r.temp}°</div>
         <div class="hour-tile-sub text-[9px] font-mono-score">${r.prob}%</div>
       </div>
@@ -1125,14 +1139,17 @@ function buildDayPlayersCardHtml(d, plannerRow, members, activeMember, course) {
     infoLines.push(`<span class="font-medium text-[#18241e]">Starttijd <span class="font-mono-score">${escapeHtml(plannerRow.confirmed)}</span></span>`);
   }
   if (plannerRow.hasOverlap && plannerRow.overlapText) {
-    infoLines.push(`<span>Overlap <span class="font-mono-score font-medium text-[#18241e]">${escapeHtml(plannerRow.overlapText)}</span></span>`);
+    infoLines.push(`<span>Starttijden (${plannerRow.holes}h) <span class="font-mono-score font-medium text-[#18241e]">${escapeHtml(plannerRow.overlapText)}</span></span>`);
+    if (plannerRow.presenceText) {
+      infoLines.push(`<span class="text-[#66706a]">Aanwezig ${escapeHtml(plannerRow.presenceText)}</span>`);
+    }
     if (plannerRow.partialPairTip) {
       infoLines.push(`<span class="text-[#755c2e]">${escapeHtml(plannerRow.partialPairTip)}</span>`);
     }
     if (plannerRow.weatherOverlap?.possible) {
       infoLines.push(`
         <span class="text-[#1b3a2d] font-medium">
-          ${escapeHtml(plannerRow.weatherOverlap.label)} · score <span class="font-mono-score">${plannerRow.weatherOverlap.score}</span>
+          Weer-advies: ${escapeHtml(plannerRow.weatherOverlap.label)} · cijfer <span class="font-mono-score">${formatWeatherGrade(plannerRow.weatherOverlap.score)}</span>
         </span>
       `);
     } else if (plannerRow.weatherOverlap && !plannerRow.weatherOverlap.possible) {
@@ -1140,7 +1157,11 @@ function buildDayPlayersCardHtml(d, plannerRow, members, activeMember, course) {
     }
   } else if (plannerRow.count >= 2 && !plannerRow.hasOverlap) {
     const names = (plannerRow.allAvailMembers || plannerRow.availMembers || []).map(m => m.shortName).join(' & ');
-    infoLines.push(`<span class="text-[#72363a]">Geen overlappende tijden${names ? ` (${escapeHtml(names)})` : ''}</span>`);
+    if (plannerRow.shortRoundDetail) {
+      infoLines.push(`<span class="text-[#755c2e]">${escapeHtml(plannerRow.overlapText)} · ${escapeHtml(plannerRow.shortRoundDetail)}</span>`);
+    } else {
+      infoLines.push(`<span class="text-[#72363a]">Geen overlappende tijden${names ? ` (${escapeHtml(names)})` : ''}</span>`);
+    }
   } else if (plannerRow.singleAvailNote) {
     infoLines.push(`<span class="text-[#66706a]">${escapeHtml(plannerRow.singleAvailNote)}</span>`);
   }
@@ -1238,24 +1259,32 @@ function renderSingleCourse() {
       const pRow = plannerData?.byDate?.[d.dateIso] || null;
       const svgIcon = weatherSvgIcon(d.code, d.precip, d.prob, 'w-4 h-4', isSelected);
 
+      const isConfirmed = Boolean(pRow?.confirmed);
+      const isGo3 = !isConfirmed && pRow?.potentieel === 'GOGOGO' && pRow?.hasOverlap;
+      const isGo2 = !isConfirmed && pRow?.potentieel === 'GO' && pRow?.hasOverlap;
+
+      const cardSurfaceCls = isSelected
+        ? 'bg-[#163828] text-white border-[#b89652]'
+        : isConfirmed
+          ? 'bg-[#eef5f1] text-[#18241e] border-[#163828]/55 border-t-[3px] border-t-[#163828] hover:border-[#163828]'
+          : isGo3
+            ? 'bg-[#f1f7f3] text-[#18241e] border-[#8bb89e] border-t-[3px] border-t-[#1b5e3d] hover:border-[#1b5e3d]'
+            : isGo2
+              ? 'bg-[#fdfaf0] text-[#18241e] border-[#d4b66c] border-t-[3px] border-t-[#b89652] hover:border-[#9e7a34]'
+              : 'bg-white text-[#535d57] border-[#e4dfd3] hover:border-[#163828]/50';
+
       let microLineHtml = '';
-      if (pRow) {
-        if (pRow.confirmed) {
-          microLineHtml = `<span class="mt-0.5 font-mono-score text-[10px] font-medium ${isSelected ? 'text-[#e2c891]' : 'text-[#163828]'}">✓ ${escapeHtml(pRow.confirmed)}</span>`;
-        } else if (pRow.potentieel === 'GOGOGO') {
-          microLineHtml = `<span class="mt-0.5 text-[10px] font-medium ${isSelected ? 'text-[#e2c891]' : 'text-[#1b4332]'}">3/3 GO</span>`;
-        } else if (pRow.potentieel === 'GO') {
-          microLineHtml = `<span class="mt-0.5 text-[10px] font-medium ${isSelected ? 'text-[#e2c891]' : 'text-[#755c2e]'}">2/3 GO</span>`;
-        }
+      if (isConfirmed) {
+        microLineHtml = `<span class="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono-score font-semibold ${isSelected ? 'bg-[#e2c891] text-[#163828]' : 'bg-[#163828] text-white'}">✓ ${escapeHtml(pRow.confirmed)}</span>`;
+      } else if (isGo3) {
+        microLineHtml = `<span class="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${isSelected ? 'bg-[#d6ede0] text-[#123322]' : 'bg-[#1b5e3d] text-white'}">${playersMiniSvg('w-2.5 h-2.5')}3/3 GO</span>`;
+      } else if (isGo2) {
+        microLineHtml = `<span class="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${isSelected ? 'bg-[#e2c891] text-[#163828]' : 'bg-[#f3e5c0] text-[#4f380d] border border-[#c8a24b]'}">${playersMiniSvg('w-2.5 h-2.5')}2/3 GO</span>`;
       }
 
       return `
         <button type="button" data-jumpday="${d.dayIndex}"
-          class="min-w-[64px] rounded-xl px-2 py-2 text-center border transition flex flex-col items-center justify-center gap-1 ${
-            isSelected
-              ? 'bg-[#163828] text-white border-[#b89652]'
-              : 'bg-white text-[#535d57] border-[#e4dfd3] hover:border-[#163828]/50'
-          }">
+          class="min-w-[64px] rounded-xl px-2 py-2 text-center border transition flex flex-col items-center justify-center gap-1 ${cardSurfaceCls}">
           <span class="inline-flex items-center gap-1 text-[11px] font-medium">
             <span>${d.dayPill}</span>
             ${isBest ? `<span class="${isSelected ? 'text-[#e2c891]' : 'text-[#8f723d]'}" title="Beste dag" aria-hidden="true">★</span><span class="visually-hidden">(beste dag)</span>` : ''}
@@ -1263,7 +1292,7 @@ function renderSingleCourse() {
           ${svgIcon}
           <span class="inline-flex items-center gap-1.5 font-mono-score text-sm font-semibold ${isSelected ? 'text-white' : 'text-[#18241e]'}">
             ${!isSelected ? `<span class="w-2 h-2 rounded-full shrink-0" style="${badge.dotStyle}" aria-hidden="true"></span>` : ''}
-            <span>${d.score}</span>
+            <span>${formatWeatherGrade(d.score)}</span>
           </span>
           ${microLineHtml}
         </button>
@@ -1282,15 +1311,29 @@ function renderSingleCourse() {
   const banner = $('bestWeekBanner');
   if (banner) {
     const bMeta = scoreBadgeMeta(bestDay.score);
+    const bestPRow = plannerData?.byDate?.[bestDay.dateIso] || null;
+    const bestNames = (bestPRow?.availMembers || []).map(m => m.shortName).join(' & ');
+    let bestPlayersPill = '';
+    if (bestPRow?.confirmed) {
+      bestPlayersPill = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#e2c891] text-[#163828] font-mono-score">${playersMiniSvg()}Bevestigd ${escapeHtml(bestPRow.confirmed)}${bestNames ? ` · ${escapeHtml(bestNames)}` : ''}</span>`;
+    } else if (bestPRow?.potentieel === 'GOGOGO' && bestPRow?.hasOverlap) {
+      bestPlayersPill = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#d6ede0] text-[#123322]">${playersMiniSvg()}3/3 GOGOGO</span>`;
+    } else if (bestPRow?.potentieel === 'GO' && bestPRow?.hasOverlap) {
+      bestPlayersPill = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#e2c891] text-[#163828]">${playersMiniSvg()}2/3 GO${bestNames ? ` · ${escapeHtml(bestNames)}` : ''}</span>`;
+    }
+
     banner.innerHTML = `
       <div class="flex flex-wrap items-center justify-between gap-4">
         <div class="space-y-1 min-w-0">
-          <div class="inline-flex items-center gap-1.5 text-xs font-medium text-[#e2c891]">
-            <svg class="w-3.5 h-3.5 shrink-0" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M6 20V4l10 3.5L6 11" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M4 20h4" stroke-linecap="round"/>
-            </svg>
-            <span>Beste speeldag</span>
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="inline-flex items-center gap-1.5 text-xs font-medium text-[#e2c891]">
+              <svg class="w-3.5 h-3.5 shrink-0" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M6 20V4l10 3.5L6 11" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4 20h4" stroke-linecap="round"/>
+              </svg>
+              <span>Beste speeldag</span>
+            </div>
+            ${bestPlayersPill}
           </div>
           <h2 class="font-serif-club text-lg sm:text-xl font-semibold text-white leading-snug">
             ${bestDay.dayTitle} ${bestDay.dateShort} — ${bestDay.teeTimeLabel}
@@ -1301,7 +1344,7 @@ function renderSingleCourse() {
         </div>
         <div class="shrink-0">
           <div class="inline-flex flex-col items-center px-3.5 py-2 rounded-lg bg-white/10 border border-[#b89652]/50 text-white">
-            <span class="font-mono-score text-xl font-semibold leading-none">${bestDay.score}</span>
+            <span class="font-mono-score text-xl font-semibold leading-none">${formatWeatherGrade(bestDay.score)}</span>
             <span class="text-[11px] font-medium text-[#e2c891] mt-1">${bMeta.label}</span>
           </div>
         </div>
@@ -1321,9 +1364,25 @@ function renderSingleCourse() {
       const dayIconSvg = weatherSvgIcon(d.code, d.precip, d.prob, 'w-5 h-5');
       const scorePillStyle = d.score >= 82 ? `${badge.bgStyle} border-color: ${badge.hex};` : badge.tintStyle;
 
+      const isConfirmed = Boolean(pRow?.confirmed);
+      const isGo3 = !isConfirmed && pRow?.potentieel === 'GOGOGO' && pRow?.hasOverlap;
+      const isGo2 = !isConfirmed && pRow?.potentieel === 'GO' && pRow?.hasOverlap;
+      const articleAccent = isConfirmed
+        ? 'border-l-4 border-l-[#163828]'
+        : isGo3
+          ? 'border-l-4 border-l-[#1b5e3d]'
+          : isGo2
+            ? 'border-l-4 border-l-[#b89652]'
+            : '';
+      const headerBg = (isConfirmed || isGo3)
+        ? 'bg-[#f5faf7] hover:bg-[#edf5f0]'
+        : isGo2
+          ? 'bg-[#fdfbf5] hover:bg-[#f8f3e6]'
+          : 'hover:bg-[#faf9f5]';
+
       return `
-        <article id="day-card-${d.dayIndex}" class="bg-white rounded-xl border ${isOpen ? 'border-[#163828]' : 'border-[#e6e3db]'} overflow-hidden transition">
-          <button type="button" data-toggle-day="${d.dayIndex}" aria-expanded="${isOpen}" class="day-card-toggle w-full text-left px-4 py-3.5 sm:px-5 cursor-pointer hover:bg-[#faf9f5] transition flex items-center justify-between gap-4">
+        <article id="day-card-${d.dayIndex}" class="bg-white rounded-xl border ${isOpen ? 'border-[#163828]' : 'border-[#e6e3db]'} ${articleAccent} overflow-hidden transition">
+          <button type="button" data-toggle-day="${d.dayIndex}" aria-expanded="${isOpen}" class="day-card-toggle w-full text-left px-4 py-3.5 sm:px-5 cursor-pointer ${headerBg} transition flex items-center justify-between gap-4">
             <span class="flex items-center gap-3.5 min-w-0">
               ${dayIconSvg}
               <span class="block min-w-0 space-y-1">
@@ -1345,8 +1404,8 @@ function renderSingleCourse() {
             </span>
 
             <span class="flex items-center gap-3 shrink-0">
-              <span class="inline-flex items-center justify-center px-2.5 py-1 rounded-lg border font-mono-score text-sm font-semibold min-w-[2.75rem]" style="${scorePillStyle}">
-                ${d.score}
+              <span class="inline-flex items-center justify-center px-2.5 py-1 rounded-lg border font-mono-score text-sm font-semibold min-w-[3.25rem]" style="${scorePillStyle}">
+                ${formatWeatherGrade(d.score)}
               </span>
               <svg class="w-4 h-4 text-[#66706a] transition-transform ${isOpen ? 'rotate-180' : ''}" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/>
@@ -1361,7 +1420,7 @@ function renderSingleCourse() {
                 <div class="space-y-1 text-xs text-[#535d57] prose-note">
                   <p class="text-[#18241e] font-medium">${d.scoreReason}</p>
                   <p class="text-[#66706a]">
-                    Daglicht ${d.sunriseStr}–${d.sunsetStr}${d.twilightBonus > 0 ? `, licht tot ${d.lightUntil}` : ''}${alt ? ` · Beter op ${alt.courseName} (${alt.score})` : ''}
+                    Daglicht ${d.sunriseStr}–${d.sunsetStr}${d.twilightBonus > 0 ? `, licht tot ${d.lightUntil}` : ''}${alt ? ` · Beter op ${alt.courseName} (${formatWeatherGrade(alt.score)})` : ''}
                   </p>
                 </div>
                 <button type="button" data-share-day="${d.dayIndex}" class="course-action-btn px-2.5 py-1 rounded-md text-xs font-medium text-[#1b3a2d] hover:bg-[#f2f0ea] transition shrink-0">
@@ -1484,6 +1543,8 @@ function renderCompareMatrix() {
   const refDays = state.analysesByCourse[state.courses[0].id] || [];
   if (!refDays.length) return;
 
+  const plannerData = window.SwingersPlanner?.getScheduleMapByDate?.() || null;
+
   const dayMaxScores = refDays.map((_, dIdx) => {
     let max = 0;
     state.courses.forEach(c => {
@@ -1495,7 +1556,18 @@ function renderCompareMatrix() {
 
   let thead = `<thead class="bg-[#1b3b2c] text-[#f4f1e8] border-b-2 border-[#b89652]"><tr>
     <th class="py-2.5 pl-4 pr-3 font-semibold">Golfbaan</th>
-    ${refDays.map(d => `<th class="py-2.5 px-1.5 text-center font-semibold">${d.dayPill}<br><span class="font-normal text-[11px] text-[#d4e2da]">${d.dateShort}</span></th>`).join('')}
+    ${refDays.map(d => {
+      const pRow = plannerData?.byDate?.[d.dateIso] || null;
+      let groupTag = '';
+      if (pRow?.confirmed) {
+        groupTag = `<div class="mt-1"><span class="inline-block px-1.5 py-0.5 rounded bg-[#e2c891] text-[#163828] font-mono-score text-[10px] font-semibold leading-none">✓ ${escapeHtml(pRow.confirmed)}</span></div>`;
+      } else if (pRow?.potentieel === 'GOGOGO' && pRow?.hasOverlap) {
+        groupTag = `<div class="mt-1"><span class="inline-block px-1.5 py-0.5 rounded bg-[#d6ede0] text-[#123322] text-[10px] font-semibold leading-none">3/3 GO</span></div>`;
+      } else if (pRow?.potentieel === 'GO' && pRow?.hasOverlap) {
+        groupTag = `<div class="mt-1"><span class="inline-block px-1.5 py-0.5 rounded bg-[#e2c891] text-[#163828] text-[10px] font-semibold leading-none">2/3 GO</span></div>`;
+      }
+      return `<th class="py-2.5 px-1.5 text-center font-semibold">${d.dayPill}<br><span class="font-normal text-[11px] text-[#d4e2da]">${d.dateShort}</span>${groupTag}</th>`;
+    }).join('')}
   </tr></thead>`;
 
   let tbody = '<tbody class="divide-y divide-[#e6e3db]">';
@@ -1510,8 +1582,8 @@ function renderCompareMatrix() {
         const isHighlighted = d.score >= 82 || d.score === dayMaxScores[dIdx];
         return `<td class="py-2.5 px-1 text-center">
           <button type="button" data-pick-course="${c.id}" data-pick-day="${d.dayIndex}"
-            class="w-full py-1.5 px-1.5 rounded-lg border font-mono-score text-xs transition hover:opacity-90 ${isHighlighted ? 'font-bold ring-1 ring-[#1b5e3d]/40' : 'font-medium'}" style="${b.tintStyle}">
-            ${d.score}
+            class="w-full py-1.5 px-1.5 rounded-lg border font-mono-score text-xs transition hover:opacity-90 whitespace-nowrap ${isHighlighted ? 'font-bold ring-1 ring-[#1b5e3d]/40' : 'font-medium'}" style="${b.tintStyle}">
+            ${formatWeatherGrade(d.score)}
           </button>
         </td>`;
       }).join('')}
@@ -1648,9 +1720,9 @@ function renderScorecardPng() {
     ctx.fillStyle = bMeta.hex;
     ctx.fill();
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 22px monospace';
+    ctx.font = 'bold 21px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(String(best.score), W - 81, 176);
+    ctx.fillText(formatWeatherGrade(best.score), W - 81, 176);
     ctx.font = '600 10px Inter, sans-serif';
     ctx.fillText(bMeta.label, W - 81, 191);
     ctx.textAlign = 'left';
@@ -1691,7 +1763,7 @@ function renderScorecardPng() {
         if (alt) {
           ctx.fillStyle = '#755c2e';
           ctx.font = '600 11px Inter, sans-serif';
-          ctx.fillText(`Tip: ${alt.courseName} scoort ${alt.score}/100 (+${alt.diff} pt)`, 215, y + 80);
+          ctx.fillText(`Tip: ${alt.courseName} heeft weercijfer ${formatWeatherGrade(alt.score)} (+${formatPenaltyGrade(alt.diff)})`, 215, y + 80);
         }
       }
 
@@ -1700,9 +1772,9 @@ function renderScorecardPng() {
       ctx.fillStyle = dm.hex;
       ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 21px monospace';
+      ctx.font = 'bold 20px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(String(d.score), W - 79, y + 45);
+      ctx.fillText(formatWeatherGrade(d.score), W - 79, y + 45);
       ctx.font = '600 10px Inter, sans-serif';
       ctx.fillText(dm.label, W - 79, y + 60);
       ctx.textAlign = 'left';
@@ -1735,9 +1807,9 @@ function renderScorecardPng() {
     ctx.fillStyle = dm.hex;
     ctx.fill();
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 26px monospace';
+    ctx.font = 'bold 24px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(String(d.score), W - 91, 188);
+    ctx.fillText(formatWeatherGrade(d.score), W - 91, 188);
     ctx.font = '600 11px Inter, sans-serif';
     ctx.fillText(dm.label, W - 91, 206);
     ctx.textAlign = 'left';
@@ -1793,9 +1865,9 @@ function renderScorecardPng() {
         ctx.fillStyle = m.hex;
         ctx.fill();
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 16px monospace';
+        ctx.font = 'bold 15px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(String(cd.score), cx + 25, y + 47);
+        ctx.fillText(formatWeatherGrade(cd.score), cx + 25, y + 47);
         ctx.textAlign = 'left';
       });
 
@@ -1843,7 +1915,7 @@ function buildWhatsAppTextSummary() {
   ];
   days.forEach(d => {
     const b = scoreBadgeMeta(d.score);
-    lines.push(`• *${d.dayTitle} (${d.dateShort})*: *${d.score}/100* (${b.label}) — ${d.teeTimeLabel} | ${d.scoreReason}`);
+    lines.push(`• *${d.dayTitle} (${d.dateShort})*: *${formatWeatherGrade(d.score)}* (${b.label}) — ${d.teeTimeLabel} | ${d.scoreReason}`);
   });
   lines.push('', 'Wie haakt er aan? 🏌️‍♂️');
   return lines.join('\n');
@@ -2083,6 +2155,7 @@ function init() {
   window.GolfWeerApp = {
     state,
     scoreBadgeMeta,
+    formatWeatherGrade,
     formatDecimalHour,
     copyTextFallback,
     announceStatus,

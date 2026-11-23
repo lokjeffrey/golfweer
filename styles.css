@@ -121,52 +121,74 @@ h1, h2, h3, th {
 }
 
 /* ==========================================
-   EDITORIAL UNDERLINE TABLIST
+   CLUBHOUSE NAVIGATION TABLIST
    ========================================== */
 .club-tablist {
   display: flex;
   overflow-x: auto;
-  gap: 1.5rem;
-  border-bottom: 1px solid var(--border-subtle);
+  gap: 0.375rem;
+  padding: 0.375rem;
+  background-color: var(--bg-surface);
+  border: 1px solid #d8d3c6;
+  border-radius: 0.875rem;
+  box-shadow: 0 1px 3px rgba(22, 56, 40, 0.06);
   scroll-snap-type: inline proximity;
 }
 
 .club-tab {
   position: relative;
-  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex: 1 0 auto;
   scroll-snap-align: start;
-  min-block-size: 2.5rem;
-  padding: 0.5rem 0.125rem 0.625rem;
+  min-block-size: 2.75rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.625rem;
   font-size: 0.875rem;
-  line-height: 1.3;
-  font-weight: 500;
-  color: var(--ink-muted);
+  line-height: 1.25;
+  font-weight: 600;
+  color: #2f3c35;
   background: transparent;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .club-tab:hover {
-  color: var(--ink-primary);
+  background-color: #f3f0e8;
+  color: var(--club-green);
 }
 
 .club-tab:focus-visible {
   outline: 2px solid var(--club-green);
   outline-offset: 2px;
-  border-radius: 0.25rem;
 }
 
 .club-tab[aria-selected="true"] {
-  color: var(--ink-primary);
-  font-weight: 600;
+  background-color: var(--club-green);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(22, 56, 40, 0.22);
+}
+
+.club-tab[aria-selected="true"]:hover {
+  background-color: var(--club-green);
+  color: #ffffff;
 }
 
 .club-tab[aria-selected="true"]::after {
   content: "";
   position: absolute;
-  inset: auto 0 0;
-  border-block-end: 2.5px solid var(--club-green);
+  inset: auto 0.75rem 0.2rem;
+  border-block-end: 2px solid var(--brass-accent);
+  border-radius: 999px;
+}
+
+.club-tab[aria-selected="true"] #plannerBadgeCount {
+  background-color: #e2c891;
+  color: #163828;
+  border-color: transparent;
 }
 
 .tabpanels-stack {
@@ -190,6 +212,7 @@ h1, h2, h3, th {
   min-block-size: 2.125rem;
   padding: 0.3125rem 0.75rem;
   border-radius: 0.4375rem;
+  border: 1px solid transparent;
   font-size: 0.75rem;
   line-height: 1.25;
   font-weight: 500;
@@ -197,7 +220,7 @@ h1, h2, h3, th {
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .seg-btn:hover {
@@ -210,10 +233,11 @@ h1, h2, h3, th {
 }
 
 .seg-btn[aria-pressed="true"] {
-  background-color: var(--club-green);
-  color: #ffffff;
+  background-color: var(--bg-surface);
+  color: var(--club-green);
+  border-color: var(--border-control);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(22, 56, 40, 0.18);
+  box-shadow: 0 1px 2px rgba(22, 56, 40, 0.08);
 }
 
 .quiet-btn {
@@ -304,7 +328,7 @@ dialog::backdrop {
   --col-jeff: "Jeff";
   --col-ed: "Ed";
   --col-status: "Status";
-  --col-teetime: "Tijd & weer";
+  --col-teetime: "Starttijden & weer";
   --col-booker: "Booker";
   --col-confirmed: "Bevestigd";
 }
@@ -348,6 +372,24 @@ dialog::backdrop {
 .planner-table tbody tr.planner-row-weekend th,
 .planner-table tbody tr.planner-row-weekend td {
   background-color: var(--bg-hover);
+}
+
+.planner-table tbody tr.planner-row-go th,
+.planner-table tbody tr.planner-row-go td {
+  background-color: #fdfbf5;
+}
+
+.planner-table tbody tr.planner-row-go th {
+  box-shadow: inset 3px 0 0 var(--brass-accent);
+}
+
+.planner-table tbody tr.planner-row-gogogo th,
+.planner-table tbody tr.planner-row-gogogo td {
+  background-color: #f3f8f5;
+}
+
+.planner-table tbody tr.planner-row-gogogo th {
+  box-shadow: inset 3px 0 0 #1b5e3d;
 }
 
 .planner-table tbody tr.planner-row-confirmed th,
@@ -673,6 +715,10 @@ dialog::backdrop {
   .planner-table thead th {
     border-bottom: 2px solid CanvasText;
   }
+  .club-tab[aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
   .club-tab[aria-selected="true"]::after {
     border-block-end: 3px solid Highlight;
   }
@@ -713,6 +759,8 @@ dialog::backdrop {
     outline: 2px solid Highlight;
     outline-offset: 0;
   }
+  .planner-table tbody tr.planner-row-go th,
+  .planner-table tbody tr.planner-row-gogogo th,
   .planner-table tbody tr.planner-row-confirmed th,
   .planner-table tbody tr.planner-row-today th {
     border-left: 3px solid Highlight;
