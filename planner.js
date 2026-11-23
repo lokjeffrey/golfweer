@@ -6,7 +6,10 @@
 
   const STORAGE_KEY_ROWS = 'swingersclub_rows_v1';
   const STORAGE_KEY_META = 'swingersclub_meta_v1';
-  const STORAGE_KEY_PRESENCE_MIGRATED = 'swingersclub_presence_migrated_v1';
+  const STORAGE_KEY_SEED_VERSION = 'swingersclub_seed_v3';
+
+  // Standaard Apps Script Web-App URL (/exec), zodat elk apparaat automatisch Live synchroniseert
+  const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbzQaQiImDALD81Of1pshCIF9SE8ZyGFxscL60AT432CtiU4nYaeQ4F3aA9839yEo-ve/exec';
 
   const MEMBERS = [
     { key: 'tom', name: 'Tom 🦩', shortName: 'Tom' },
@@ -21,7 +24,7 @@
   // Aangepast naar aanwezigheid op de golfclub (oude eindtijden 'tot'/'tussen' +2 uur voor 9 holes).
   const SEED_SHEET_ROWS = {
     '2026-11-23': { tom: 'x', jeff: 'hele dag', ed: 'x', confirmed: '', note: '' },
-    '2026-11-24': { tom: 'x', jeff: 'tot 17:00', ed: 'Tussen 13:00 en 17:00', confirmed: '', note: '' },
+    '2026-11-24': { tom: 'x', jeff: 'tot 17:00', ed: 'x', confirmed: '', note: '' },
     '2026-11-25': { tom: 'va 20:00 DR', jeff: 'overdag', ed: 'x', confirmed: '', note: '' },
     '2026-11-26': { tom: 'va 20:00 DR', jeff: 'tot 18:00', ed: 'x', confirmed: '', note: '' },
     '2026-11-27': { tom: 'va 16:00', jeff: 'tot 18:00', ed: 'x', confirmed: '', note: '' },
@@ -188,11 +191,12 @@ function upsertRow(item) {
     weeksCount: 4,
     activeMember: 'all', // 'all' | 'tom' | 'jeff' | 'ed'
     filter: 'all',       // 'all' | 'go' | 'week7' | 'confirmed'
-    sheetUrl: '',
+    sheetUrl: DEFAULT_SHEET_URL,
     lastSyncedAt: '',
     isSyncing: false,
     editorContext: null, // { dateIso, mode: 'member' | 'confirm', memberKey?, suggestedTee? }
-    activeTimeMode: null
+    activeTimeMode: null,
+    activeAvailType: 'teetime' // 'teetime' | 'dr'
   };
 
   const el = (id) => document.getElementById(id);
@@ -288,6 +292,28 @@ function upsertRow(item) {
   // ============================================================
   // 2. BESCHIKBAARHEID PARSER (100% COMPATIBEL MET GOOGLE SHEET)
   // ============================================================
+  function stripDrSuffix(str) {
+    return String(str || '')
+      .replace(/\bdriving\s*range\b/gi, ' ')
+      .replace(/\bdr\.?/gi, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/[\s,-]+$/g, '')
+      .replace(/^[\s,-]+/g, '')
+      .trim();
+  }
+
+  function formatWithAvailType(baseStr, availType) {
+    const raw = String(baseStr || '').trim();
+    if (/^x(?:\b|[^a-z]|$)/i.test(raw) || /(?:^|[\s(,/-])x(?:$|[\s.),/-])/i.test(raw) || /^(?:kan niet|niet)$/i.test(raw)) {
+      return raw;
+    }
+    const cleaned = stripDrSuffix(raw);
+    if (availType === 'dr') {
+      return cleaned ? `${cleaned} DR` : 'DR';
+    }
+    return cleaned;
+  }
+
   function parseAvailability(rawValue) {
     const raw = String(rawValue || '').trim();
     if (!raw) {
@@ -329,17 +355,44 @@ function upsertRow(item) {
 
     // Driving Range (DR): expliciet GEEN tee time — telt niet mee voor GO / GOGOGO, overlap of Booker
     if (isDR) {
-      let drStart = timeMatches[0] ?? 19 * 60;
-      let drEnd = timeMatches[1] ?? Math.max(22 * 60, drStart + 90);
-      if (/\btot\b/i.test(raw) && timeMatches.length === 1) {
+      let drStart = 19 * 60;
+      let drEnd = 22 * 60;
+      let drWindow = '';
+      if (timeMatches.length >= 2) {
+        drStart = timeMatches[0];
+        drEnd = timeMatches[1];
+        drWindow = `${minsToHHMM(drStart)} – ${minsToHHMM(drEnd)}`;
+      } else if (/\btot\b/i.test(raw) && timeMatches.length === 1) {
         drStart = 9 * 60;
         drEnd = timeMatches[0];
+        drWindow = `tot ${minsToHHMM(drEnd)}`;
+      } else if (timeMatches.length === 1) {
+        drStart = timeMatches[0];
+        drEnd = Math.max(22 * 60, drStart + 90);
+        drWindow = `vanaf ${minsToHHMM(drStart)}`;
+      } else if (/ochtend/i.test(raw)) {
+        drStart = 9 * 60;
+        drEnd = 12 * 60;
+        drWindow = 'ochtend (09:00 – 12:00)';
+      } else if (/middag/i.test(raw)) {
+        drStart = 12 * 60;
+        drEnd = 20 * 60;
+        drWindow = 'middag (12:00 – 20:00)';
+      } else if (/avond/i.test(raw)) {
+        drStart = 18 * 60;
+        drEnd = 22 * 60;
+        drWindow = 'avond (18:00 – 22:00)';
+      } else if (/hele\s*dag|overdag|ja/i.test(raw)) {
+        drStart = 9 * 60;
+        drEnd = 22 * 60;
+        drWindow = 'hele dag';
+      } else if (/misschien/i.test(raw)) {
+        drStart = 9 * 60;
+        drEnd = 22 * 60;
+        drWindow = 'misschien';
+      } else {
+        drWindow = stripDrSuffix(raw);
       }
-      const drWindow = timeMatches.length >= 2
-        ? `${minsToHHMM(drStart)} – ${minsToHHMM(drEnd)}`
-        : timeMatches.length === 1
-          ? `vanaf ${minsToHHMM(drStart)}`
-          : raw;
       return {
         raw,
         displayLabel: raw,
@@ -350,7 +403,7 @@ function upsertRow(item) {
         startMins: drStart,
         endMins: drEnd,
         cssClass: 'avail-dr',
-        summary: `Driving Range (${drWindow}) — geen tee time`
+        summary: drWindow ? `Driving Range (${drWindow}) — geen tee time` : 'Driving Range — geen tee time'
       };
     }
 
@@ -817,81 +870,35 @@ function upsertRow(item) {
   // ============================================================
   // 4. OPSLAG (LOCALSTORAGE) & GOOGLE APPS SCRIPT SYNC
   // ============================================================
-  function shiftLegacyEndTimeToPresence(rawValue) {
-    const raw = String(rawValue || '').trim();
-    if (!raw || /^x(?:\b|[^a-z]|$)/i.test(raw) || /\bdr\b/i.test(raw)) return raw;
-
-    const addTwoHours = (timeToken) => {
-      const sep = timeToken.includes('.') ? '.' : ':';
-      const mins = parseTimeStrToMins(timeToken);
-      if (mins === null) return timeToken;
-      const shifted = Math.min(22 * 60, mins + 120);
-      const hh = String(Math.floor(shifted / 60)).padStart(2, '0');
-      const mm = String(shifted % 60).padStart(2, '0');
-      return `${hh}${sep}${mm}`;
-    };
-
-    // "tussen 13:00 en 15:00" of "13:00-15:00" -> verschuif alleen de 2e (eind)tijd +2u
-    if (/tussen/i.test(raw) || /\d{1,2}[:.]\d{2}\s*(?:[-–]|en|tot)\s*\d{1,2}[:.]\d{2}/i.test(raw)) {
-      let seen = 0;
-      return raw.replace(/\d{1,2}[:.]\d{2}/g, (match) => {
-        seen++;
-        return seen === 2 ? addTwoHours(match) : match;
-      });
-    }
-
-    // "tot 15:00" -> "tot 17:00"
-    if (/\btot\b/i.test(raw)) {
-      return raw.replace(/\d{1,2}[:.]\d{2}/, (match) => addTwoHours(match));
-    }
-
-    return raw;
-  }
-
   function loadLocalData() {
     let savedRows = null;
+    let seedVersion = '';
     try {
       const raw = localStorage.getItem(STORAGE_KEY_ROWS);
       if (raw) savedRows = JSON.parse(raw);
+      seedVersion = localStorage.getItem(STORAGE_KEY_SEED_VERSION) || '';
     } catch (e) {}
 
-    if (savedRows && typeof savedRows === 'object' && Object.keys(savedRows).length > 0) {
+    if (seedVersion === '3' && savedRows && typeof savedRows === 'object' && Object.keys(savedRows).length > 0) {
       plannerState.rowsByDate = savedRows;
-      // Eenmalige migratie voor reeds lokaal opgeslagen tijden (oude tee-time eindtijden +2u -> clubaanwezigheid)
-      let alreadyMigrated = false;
-      try { alreadyMigrated = localStorage.getItem(STORAGE_KEY_PRESENCE_MIGRATED) === '1'; } catch (e) {}
-      if (!alreadyMigrated) {
-        let changed = false;
-        Object.keys(plannerState.rowsByDate).forEach(dateIso => {
-          if (dateIso < '2026-11-23') return;
-          const row = plannerState.rowsByDate[dateIso];
-          if (!row) return;
-          MEMBERS.forEach(m => {
-            if (row[m.key]) {
-              const nextVal = shiftLegacyEndTimeToPresence(row[m.key]);
-              if (nextVal !== row[m.key]) {
-                row[m.key] = nextVal;
-                changed = true;
-              }
-            }
-          });
-        });
-        try { localStorage.setItem(STORAGE_KEY_PRESENCE_MIGRATED, '1'); } catch (e) {}
-        if (changed) saveLocalData();
-      }
     } else {
       plannerState.rowsByDate = JSON.parse(JSON.stringify(SEED_SHEET_ROWS));
-      try { localStorage.setItem(STORAGE_KEY_PRESENCE_MIGRATED, '1'); } catch (e) {}
+      try {
+        localStorage.setItem(STORAGE_KEY_SEED_VERSION, '3');
+        localStorage.setItem(STORAGE_KEY_ROWS, JSON.stringify(plannerState.rowsByDate));
+      } catch (e) {}
     }
 
     try {
       const meta = JSON.parse(localStorage.getItem(STORAGE_KEY_META) || '{}');
-      if (meta.sheetUrl) plannerState.sheetUrl = meta.sheetUrl;
+      plannerState.sheetUrl = meta.sheetUrl || DEFAULT_SHEET_URL || '';
       if (meta.lastSyncedAt) plannerState.lastSyncedAt = meta.lastSyncedAt;
       if (meta.activeMember) plannerState.activeMember = meta.activeMember;
       if (meta.weeksCount && meta.weeksCount >= 2) plannerState.weeksCount = meta.weeksCount;
       if (meta.baseCredits) plannerState.baseCredits = { ...DEFAULT_BASE_CREDITS, ...meta.baseCredits };
-    } catch (e) {}
+    } catch (e) {
+      if (DEFAULT_SHEET_URL) plannerState.sheetUrl = DEFAULT_SHEET_URL;
+    }
   }
 
   function saveLocalData() {
@@ -1558,6 +1565,50 @@ function upsertRow(item) {
     }
   }
 
+  function updateTimeModeButtonsUi() {
+    document.querySelectorAll('button[data-time-mode]').forEach(btn => {
+      const isActive = plannerState.activeTimeMode === btn.dataset.timeMode;
+      btn.setAttribute('aria-pressed', String(isActive));
+      btn.className = isActive
+        ? 'time-mode-btn px-3 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer bg-[#163828] text-white border-[#163828] min-h-[2.25rem]'
+        : 'time-mode-btn quiet-btn';
+    });
+  }
+
+  function setAvailActivityType(type, { updateInput = true } = {}) {
+    const normalized = type === 'dr' ? 'dr' : 'teetime';
+    plannerState.activeAvailType = normalized;
+
+    document.querySelectorAll('#availActivityTypeGroup button[data-avail-type]').forEach(btn => {
+      const btnType = btn.dataset.availType;
+      const isSelected = btnType === normalized;
+      btn.setAttribute('aria-pressed', String(isSelected));
+      if (btnType === 'dr') {
+        btn.className = isSelected
+          ? 'avail-type-btn px-3 py-2 rounded-lg border text-xs font-semibold transition cursor-pointer bg-[#4b3869] text-white border-[#4b3869] min-h-[2.25rem]'
+          : 'avail-type-btn px-3 py-2 rounded-lg border text-xs font-medium transition cursor-pointer bg-white text-[#4b3869] border-[#dcd3e8] hover:border-[#4b3869] min-h-[2.25rem]';
+      } else {
+        btn.className = isSelected
+          ? 'avail-type-btn px-3 py-2 rounded-lg border text-xs font-semibold transition cursor-pointer bg-[#163828] text-white border-[#163828] min-h-[2.25rem]'
+          : 'avail-type-btn px-3 py-2 rounded-lg border text-xs font-medium transition cursor-pointer bg-white text-[#18241e] border-[#d6cfc0] hover:border-[#163828] min-h-[2.25rem]';
+      }
+    });
+
+    updateTimeModeButtonsUi();
+
+    if (updateInput) {
+      const input = el('availRawInput');
+      if (input) {
+        if (plannerState.activeTimeMode) {
+          applyTimeBuilderToInput();
+        } else {
+          input.value = formatWithAvailType(input.value, normalized);
+          updateRawParsePreview();
+        }
+      }
+    }
+  }
+
   function applyTimeBuilderToInput() {
     const mode = plannerState.activeTimeMode;
     const startVal = el('availTimeStart')?.value || '12:00';
@@ -1565,10 +1616,12 @@ function upsertRow(item) {
     const input = el('availRawInput');
     if (!input || !mode) return;
 
-    if (mode === 'va') input.value = `va ${startVal}`;
-    else if (mode === 'tot') input.value = `tot ${endVal}`;
-    else if (mode === 'tussen') input.value = `${startVal}-${endVal}`;
-    else if (mode === 'dr') input.value = `va ${startVal} DR`;
+    let baseStr = '';
+    if (mode === 'va') baseStr = `va ${startVal}`;
+    else if (mode === 'tot') baseStr = `tot ${endVal}`;
+    else if (mode === 'tussen') baseStr = `${startVal}-${endVal}`;
+
+    input.value = formatWithAvailType(baseStr, plannerState.activeAvailType);
     updateRawParsePreview();
   }
 
@@ -1668,6 +1721,7 @@ function upsertRow(item) {
       if (subEl) subEl.textContent = `${dateMeta.weekdayLong} ${dateMeta.dateShort} (${ctx.dateIso})`;
       memberFields?.classList.remove('hidden');
       el('timeBuilderInputs')?.classList.add('hidden');
+      setAvailActivityType('teetime', { updateInput: false });
 
       const input = el('availRawInput');
       if (input) {
@@ -1923,7 +1977,12 @@ function upsertRow(item) {
       updateSyncPillUi();
       if (el('sheetWebAppUrl')) el('sheetWebAppUrl').value = '';
       el('btnCopyShareConnectLink')?.classList.add('hidden');
-      showSyncModalMessage('Google Sheet-koppeling verbroken. De planner werkt nu lokaal in je browser.', 'info');
+      showSyncModalMessage(
+        DEFAULT_SHEET_URL
+          ? 'Tijdelijk losgekoppeld van Google Sheet. Bij herladen van de pagina herstelt de standaard Live-koppeling automatisch.'
+          : 'Google Sheet-koppeling verbroken. De planner werkt nu lokaal in je browser.',
+        'info'
+      );
     });
 
     el('btnResetSeedData')?.addEventListener('click', () => {
@@ -1938,18 +1997,35 @@ function upsertRow(item) {
     // Beschikbaarheid Editor Dialog events
     el('btnCloseAvailDialog')?.addEventListener('click', () => el('availEditorDialog')?.close());
     el('btnCancelAvailDialog')?.addEventListener('click', () => el('availEditorDialog')?.close());
-    el('availRawInput')?.addEventListener('input', updateRawParsePreview);
+    el('availRawInput')?.addEventListener('input', () => {
+      plannerState.activeTimeMode = null;
+      updateTimeModeButtonsUi();
+      updateRawParsePreview();
+    });
+
+    document.querySelectorAll('#availActivityTypeGroup button[data-avail-type]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setAvailActivityType(btn.dataset.availType, { updateInput: true });
+      });
+    });
 
     document.querySelectorAll('button[data-quick-avail]').forEach(btn => {
       btn.addEventListener('click', () => {
         const input = el('availRawInput');
-        if (input) {
-          input.value = btn.dataset.quickAvail;
-          plannerState.activeTimeMode = null;
-          el('timeBuilderInputs')?.classList.add('hidden');
-          updateRawParsePreview();
-          input.focus();
+        if (!input) return;
+        const quickVal = btn.dataset.quickAvail;
+        plannerState.activeTimeMode = null;
+        el('timeBuilderInputs')?.classList.add('hidden');
+        updateTimeModeButtonsUi();
+
+        if (quickVal === 'x' || quickVal === '') {
+          setAvailActivityType('teetime', { updateInput: false });
+          input.value = quickVal;
+        } else {
+          input.value = formatWithAvailType(quickVal, plannerState.activeAvailType);
         }
+        updateRawParsePreview();
+        input.focus();
       });
     });
 
@@ -1966,7 +2042,7 @@ function upsertRow(item) {
         if (mode === 'va') {
           startInput.parentElement.classList.remove('hidden');
           endWrap.classList.add('hidden');
-          if (!startInput.value || startInput.value === '20:00') startInput.value = '13:00';
+          if (!startInput.value) startInput.value = '13:00';
         } else if (mode === 'tot') {
           startInput.parentElement.classList.add('hidden');
           endWrap.classList.remove('hidden');
@@ -1976,11 +2052,8 @@ function upsertRow(item) {
           endWrap.classList.remove('hidden');
           if (!startInput.value) startInput.value = '10:00';
           if (!endInput.value) endInput.value = '14:00';
-        } else if (mode === 'dr') {
-          startInput.parentElement.classList.remove('hidden');
-          endWrap.classList.add('hidden');
-          startInput.value = '20:00';
         }
+        updateTimeModeButtonsUi();
         applyTimeBuilderToInput();
       });
     });
@@ -2143,6 +2216,13 @@ function upsertRow(item) {
         maybeAutoPullFromSheet();
       }
     });
+
+    // Periodieke achtergrond-sync (elke 30s) terwijl het tabblad openstaat
+    setInterval(() => {
+      if (document.visibilityState === 'visible' && plannerState.sheetUrl) {
+        maybeAutoPullFromSheet();
+      }
+    }, 30000);
 
     renderPlanner();
     window.GolfWeerApp?.refreshSingleCourse?.();
