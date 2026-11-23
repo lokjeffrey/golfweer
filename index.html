@@ -404,6 +404,18 @@
         </div>
 
         <div>
+          <span class="block font-medium text-[#535d57] mb-1.5">Type afspraak</span>
+          <div id="availActivityTypeGroup" class="grid grid-cols-2 gap-1.5" role="group" aria-label="Type afspraak: Starttijd of Driving Range">
+            <button type="button" data-avail-type="teetime" aria-pressed="true" class="avail-type-btn px-3 py-2 rounded-lg border text-xs font-semibold transition cursor-pointer bg-[#163828] text-white border-[#163828] min-h-[2.25rem]">
+              ⛳ Starttijd (baan)
+            </button>
+            <button type="button" data-avail-type="dr" aria-pressed="false" class="avail-type-btn px-3 py-2 rounded-lg border text-xs font-medium transition cursor-pointer bg-white text-[#4b3869] border-[#dcd3e8] hover:border-[#4b3869] min-h-[2.25rem]">
+              🎯 Driving Range (DR)
+            </button>
+          </div>
+        </div>
+
+        <div>
           <span class="block font-medium text-[#535d57] mb-1.5">Snelle keuze (aanwezig op de club)</span>
           <div class="grid grid-cols-3 gap-1.5">
             <button type="button" data-quick-avail="hele dag" class="px-2.5 py-2 rounded-lg border avail-yes hover:opacity-90 min-h-[2.25rem]">Hele dag</button>
@@ -415,14 +427,13 @@
           </div>
         </div>
 
-        <!-- Tijdbouwer (Vanaf / Tot / Tussen / DR) -->
+        <!-- Tijdbouwer (Vanaf / Tot / Tussen) -->
         <div class="bg-[#faf9f5] rounded-lg border border-[#e6e3db] p-3 space-y-2.5">
           <span class="block font-medium text-[#535d57]">Specifieke tijden</span>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+          <div class="grid grid-cols-3 gap-1.5">
             <button type="button" data-time-mode="va" class="time-mode-btn quiet-btn">Vanaf...</button>
             <button type="button" data-time-mode="tot" class="time-mode-btn quiet-btn">Tot...</button>
             <button type="button" data-time-mode="tussen" class="time-mode-btn quiet-btn">Tussen...</button>
-            <button type="button" data-time-mode="dr" class="time-mode-btn px-2 py-1.5 rounded-lg border avail-dr min-h-[2.25rem]">DR</button>
           </div>
           <div id="timeBuilderInputs" class="hidden grid grid-cols-2 gap-2 pt-1">
             <div>
