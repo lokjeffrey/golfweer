@@ -13,12 +13,12 @@ const DEFAULT_COURSES = [
     booking: {
       primary: true,
       shortName: 'Kromme Rijn',
-      url: 'https://www.krommerijn.nl/starttijden/',
-      memberUrl: 'https://www.krommerijn.nl/inloggen-e-golf4u/',
+      url: 'https://krommerijn.teetime.e-golf4u.nl/app/booking/teetime',
+      memberUrl: 'https://krommerijn.teetime.e-golf4u.nl/app/booking/teetime',
       memberUntil: '2026-12-31',
       system: 'E-Golf4U',
       advanceDays: null,
-      rule: 'Lid t/m 31 dec 2026 (E-Golf4U) · daarna greenfee via starttijden'
+      rule: 'Lid t/m 31 dec 2026 (E-Golf4U) · direct naar starttijden boeken'
     }
   },
   {
