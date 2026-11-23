@@ -526,14 +526,73 @@ dialog::backdrop {
   pointer-events: none;
 }
 
+.daylight-cutoff-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background-color: #163828;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 2;
+}
+
 .overlap-timeline-track {
   position: relative;
   width: 100%;
-  min-block-size: 1.375rem;
+  min-block-size: 1.5rem;
   border-radius: 999px;
   background-color: var(--bg-subtle);
   border: 1px solid var(--border-subtle);
   overflow: hidden;
+}
+
+.overlap-seg-presence {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 999px;
+  background-color: #e6e3db;
+}
+
+.overlap-seg-dark-tail {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 0 999px 999px 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(44, 62, 56, 0.14) 0 4px,
+    rgba(44, 62, 56, 0.04) 4px 8px
+  );
+}
+
+.overlap-seg-finish-tail {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 999px;
+  background-color: rgba(27, 94, 61, 0.16);
+  border: 1px dashed rgba(27, 94, 61, 0.45);
+}
+
+.overlap-seg-feasible {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 999px;
+  background-color: #c5decf;
+  border: 1px solid #568368;
+}
+
+.overlap-seg-optimal {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 999px;
+  background-color: var(--club-green);
+  border: 1.5px solid var(--brass-accent);
+  z-index: 2;
 }
 
 .overlap-timeline-bar {
@@ -601,6 +660,21 @@ dialog::backdrop {
   border: 1.5px solid #163828;
 }
 
+.daylight-swatch-presence {
+  background-color: #e6e3db;
+  border: 1px solid #b8b3a6;
+}
+
+.daylight-swatch-feasible {
+  background-color: #c5decf;
+  border: 1px solid #568368;
+}
+
+.daylight-swatch-optimal {
+  background-color: var(--club-green);
+  border: 1.5px solid var(--brass-accent);
+}
+
 .hourly-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -659,6 +733,16 @@ dialog::backdrop {
   background-color: #eff6f1;
   border-color: #163828;
   border-top-color: #b89652;
+}
+
+.hour-tile-outside {
+  background-color: #f4f2ec;
+  border-color: #e6e3db;
+  color: var(--ink-secondary);
+}
+
+.hour-tile-outside .hour-score-pill {
+  filter: saturate(0.45);
 }
 
 /* ==========================================
@@ -742,6 +826,19 @@ dialog::backdrop {
   }
   .daylight-best-marker {
     border-color: CanvasText;
+  }
+  .daylight-cutoff-tick {
+    background-color: CanvasText;
+  }
+  .overlap-seg-presence {
+    border: 1px dashed GrayText;
+  }
+  .overlap-seg-feasible {
+    border: 1px solid CanvasText;
+  }
+  .overlap-seg-optimal {
+    background-color: Highlight;
+    border: 2px solid CanvasText;
   }
   .hour-tile-daylight {
     border: 1px solid CanvasText;

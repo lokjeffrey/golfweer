@@ -215,7 +215,7 @@ async function fetchAllWeatherData() {
   try {
     const lats = state.courses.map(c => c.lat).join(',');
     const lons = state.courses.map(c => c.lon).join(',');
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&hourly=temperature_2m,apparent_temperature,precipitation,precipitation_probability,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,weather_code&daily=sunrise,sunset&timezone=Europe%2FAmsterdam&forecast_days=7`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,uv_index,precipitation,precipitation_probability,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,weather_code&daily=sunrise,sunset,uv_index_max&timezone=Europe%2FAmsterdam&forecast_days=7`;
 
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
@@ -356,19 +356,49 @@ function scoreBadgeMeta(score) {
   };
 }
 
+function getCourseEffectiveAppTemp(temp, appTemp, rawWindKmh, course) {
+  if (temp >= 20 || rawWindKmh < 5) return appTemp;
+  const windDiff = (course.windFactor || 1.0) - 1.0; // -0.20 bosbaan (luwte), +0.15 open polderbaan
+  const coldWeight = Math.min(1.2, (20 - temp) / 15);
+  const windFactorScale = Math.min(30, rawWindKmh) / 15;
+  const delta = Math.max(-2.5, Math.min(2.5, -windDiff * windFactorScale * coldWeight * 2.5));
+  return appTemp + delta;
+}
+
+function getCourseExposureMultiplier(course) {
+  const wf = course.windFactor || 1.0;
+  if (wf >= 1.10) return 1.15; // Open polderbaan: volle zon, geen schaduw
+  if (wf >= 1.00) return 1.05; // Park/polderbaan: licht open
+  if (wf >= 0.88) return 1.00; // Parkbaan: gemiddelde schaduw
+  if (wf >= 0.83) return 0.90; // Bos/parkbaan: deels beschut
+  return 0.82;                 // Bosbaan: welkome schaduw in de zomer
+}
+
+function getUvLevelLabel(uv) {
+  if (uv >= 8) return 'zeer hoog';
+  if (uv >= 6) return 'hoog';
+  if (uv >= 3) return 'matig';
+  return 'laag';
+}
+
 /**
  * Berekent zowel de uurscore als de uitsplitsing van strafpunten per factor,
- * zodat we per dag kort kunnen samenvatten waarom de score is zoals hij is.
+ * zodat we per dag kort kunnen samenvatten waarom het weercijfer is zoals het is.
  */
-function calculateHourlyGolfScore(hourIdx, hourly, course, pref) {
+function calculateHourlyGolfScore(hourIdx, hourly, course, pref, holes = 9) {
   const temp = hourly.temperature_2m[hourIdx];
-  const appTemp = hourly.apparent_temperature[hourIdx];
+  const rawAppTemp = hourly.apparent_temperature[hourIdx];
+  const rawWind = hourly.wind_speed_10m[hourIdx] || 0;
+  const effAppTemp = getCourseEffectiveAppTemp(temp, rawAppTemp, rawWind, course);
+  const uv = hourly.uv_index?.[hourIdx] ?? 0;
   const precip = hourly.precipitation[hourIdx] || 0;
   const prob = hourly.precipitation_probability?.[hourIdx] ?? (precip > 0 ? 70 : 10);
-  const effWind = (hourly.wind_speed_10m[hourIdx] || 0) * course.windFactor;
+  const effWind = rawWind * course.windFactor;
   const effGusts = (hourly.wind_gusts_10m[hourIdx] || effWind) * course.windFactor;
 
   const prefMult = pref === 0 ? 0.78 : pref === 2 ? 1.25 : 1.0;
+  const exposureMult = getCourseExposureMultiplier(course);
+  const durationMult = holes === 18 ? 1.25 : 1.0;
 
   // 1. Kwadratische regenkans-weging (<=10% is 0 straf; 20% ~0.5 pt; 70% ~18 pt)
   const normProb = Math.max(0, (prob - 10) / 90);
@@ -388,7 +418,7 @@ function calculateHourlyGolfScore(hourIdx, hourly, course, pref) {
   }
   const wetPenalty = priorRain > 0.3 ? Math.min(9, priorRain * 2.2) : 0;
 
-  // 4. Wind & windvlagen
+  // 4. Wind & windvlagen (bij zomerhitte is een lichte bries minder bezwaarlijk)
   let windPenalty = 0;
   if (effWind > 12) {
     windPenalty += Math.pow((effWind - 12) / 10, 1.45) * 10 * prefMult;
@@ -396,30 +426,43 @@ function calculateHourlyGolfScore(hourIdx, hourly, course, pref) {
   if (effGusts > 24) {
     windPenalty += ((effGusts - 24) / 10) * 6.5 * prefMult;
   }
+  if (effAppTemp >= 26 && effWind <= 22) {
+    windPenalty *= 0.8;
+  }
 
-  // 5. Gevoelstemperatuur (seizoensvriendelijk)
+  // 5. Gevoelstemperatuur (windchill gecorrigeerd op baanluwte + progressieve zomerhitte)
   const idealLow = pref === 0 ? 8 : pref === 2 ? 15 : 11;
-  const idealHigh = 24;
+  const idealHigh = pref === 0 ? 25 : 24;
   let coldPenalty = 0;
   let heatPenalty = 0;
-  if (appTemp < idealLow) {
-    coldPenalty = (idealLow - appTemp) * (pref === 0 ? 1.2 : pref === 2 ? 2.4 : 1.8);
-  } else if (appTemp > idealHigh) {
-    heatPenalty = (appTemp - idealHigh) * 1.7;
+  if (effAppTemp < idealLow) {
+    coldPenalty = (idealLow - effAppTemp) * (pref === 0 ? 1.2 : pref === 2 ? 2.4 : 1.8);
+  } else if (effAppTemp > idealHigh) {
+    const over = effAppTemp - idealHigh;
+    const baseHeat = over * 1.4 + Math.pow(Math.max(0, over - 3), 1.65) * 0.9;
+    heatPenalty = Math.min(45, baseHeat * exposureMult * durationMult);
   }
   const frostPenalty = temp <= 1.5 ? 8 : 0;
 
-  const totalPenalty = rainPenalty + wetPenalty + windPenalty + coldPenalty + heatPenalty + frostPenalty;
+  // 6. UV-index / zonkracht (vanaf UV 5, sterker op open banen & bij 18 holes)
+  let uvPenalty = 0;
+  if (uv >= 5) {
+    uvPenalty = Math.min(15, Math.pow(uv - 4.5, 1.45) * 1.15 * exposureMult * durationMult);
+  }
+
+  const totalPenalty = rainPenalty + wetPenalty + windPenalty + coldPenalty + heatPenalty + uvPenalty + frostPenalty;
   const score = Math.max(10, Math.min(100, Math.round(100 - totalPenalty)));
 
   return {
     score,
+    effAppTemp,
     penalties: {
       rain: rainPenalty,
       wet: wetPenalty,
       wind: windPenalty,
       cold: coldPenalty,
       heat: heatPenalty,
+      uv: uvPenalty,
       frost: frostPenalty
     }
   };
@@ -453,7 +496,12 @@ function buildScoreReason(avgPenalties, rep, bestScore) {
     items.push({ pts: avgPenalties.cold, text: `${label} (-${formatPenaltyGrade(avgPenalties.cold)})` });
   }
   if (avgPenalties.heat >= 3.5) {
-    items.push({ pts: avgPenalties.heat, text: `Warm (-${formatPenaltyGrade(avgPenalties.heat)})` });
+    const label = rep.appTemp >= 30 ? 'Hitte' : (rep.humidity >= 70 && rep.temp >= 24 ? 'Benauwd' : 'Warm');
+    items.push({ pts: avgPenalties.heat, text: `${label} (-${formatPenaltyGrade(avgPenalties.heat)})` });
+  }
+  if (avgPenalties.uv >= 3.0) {
+    const label = rep.uv >= 7 ? 'Sterke UV' : 'Hoge UV';
+    items.push({ pts: avgPenalties.uv, text: `${label} (-${formatPenaltyGrade(avgPenalties.uv)})` });
   }
   if (avgPenalties.frost >= 3.5) {
     items.push({ pts: avgPenalties.frost, text: `Kans op rijp (-${formatPenaltyGrade(avgPenalties.frost)})` });
@@ -536,13 +584,15 @@ function analyzeCourse7Days(course) {
     const hourRows = [];
     for (let h = 0; h < 24; h++) {
       const idx = baseIdx + h;
-      const res = calculateHourlyGolfScore(idx, hourly, course, state.preference);
+      const res = calculateHourlyGolfScore(idx, hourly, course, state.preference, state.holes);
       hourRows.push({
         hour: h,
         score: res.score,
         penalties: res.penalties,
         temp: Math.round(hourly.temperature_2m[idx]),
-        appTemp: Math.round(hourly.apparent_temperature[idx]),
+        appTemp: Math.round(res.effAppTemp),
+        uv: +(hourly.uv_index?.[idx] ?? 0).toFixed(1),
+        humidity: Math.round(hourly.relative_humidity_2m?.[idx] ?? 65),
         precip: +(hourly.precipitation[idx] || 0).toFixed(1),
         prob: Math.round(hourly.precipitation_probability?.[idx] ?? 0),
         wind: Math.round((hourly.wind_speed_10m[idx] || 0) * course.windFactor),
@@ -605,7 +655,7 @@ function analyzeCourse7Days(course) {
     }
 
     // Gemiddelde strafpunten tijdens het beste speelvenster voor de score-uitleg
-    const avgPen = { rain: 0, wet: 0, wind: 0, cold: 0, heat: 0, frost: 0 };
+    const avgPen = { rain: 0, wet: 0, wind: 0, cold: 0, heat: 0, uv: 0, frost: 0 };
     const stepsForPen = Math.max(1, Math.round(roundHours));
     for (let k = 0; k < stepsForPen; k++) {
       const hIdx = Math.min(23, Math.max(0, Math.round(bestStart + k)));
@@ -615,23 +665,48 @@ function analyzeCourse7Days(course) {
       avgPen.wind += p.wind / stepsForPen;
       avgPen.cold += p.cold / stepsForPen;
       avgPen.heat += p.heat / stepsForPen;
+      avgPen.uv += (p.uv || 0) / stepsForPen;
       avgPen.frost += p.frost / stepsForPen;
     }
 
-    // Metrics voor optimale starttijd
+    // Metrics voor optimale starttijd & dagdeel-trend
     const repH = Math.min(23, Math.max(0, Math.round(bestStart + roundHours / 2)));
     const rep = hourRows[repH];
     const spanHours = windowStartMax - windowStartMin;
     const scoreReason = buildScoreReason(avgPen, rep, bestScore);
 
-    // Progressieve starttijd-label
+    const totalPlayableSpan = Math.max(0.25, latestStart - earliestStart);
+    const coverageRatio = candidateStarts.length > 0 ? Math.min(1, spanHours / totalPlayableSpan) : 0;
+    const minCandidateScore = candidateStarts.length > 0
+      ? Math.min(...candidateStarts.map(c => c.score))
+      : bestScore;
+    const scoreSpread = bestScore - minCandidateScore;
+
+    const morningCandidates = candidateStarts.filter(c => c.start < 12);
+    const afternoonCandidates = candidateStarts.filter(c => c.start >= 12);
+    const morningAvg = morningCandidates.length
+      ? morningCandidates.reduce((acc, c) => acc + c.score, 0) / morningCandidates.length
+      : null;
+    const afternoonAvg = afternoonCandidates.length
+      ? afternoonCandidates.reduce((acc, c) => acc + c.score, 0) / afternoonCandidates.length
+      : null;
+    const morningMax = morningCandidates.length ? Math.max(...morningCandidates.map(c => c.score)) : null;
+    const afternoonMax = afternoonCandidates.length ? Math.max(...afternoonCandidates.map(c => c.score)) : null;
+
+    // Progressieve starttijd-label (steeds globaler verder vooruit, maar wél met zichtbare trend)
     let teeTimeLabel = '';
     let flexibilityLabel = '';
+    const hFrom = Math.floor(windowStartMin);
+    const hTo = Math.max(hFrom, Math.min(Math.floor(latestStart + 0.25), Math.ceil(windowStartMax)));
+    const approxRange = hTo > hFrom
+      ? `ca. ${String(hFrom).padStart(2, '0')}:00–${String(hTo).padStart(2, '0')}:00`
+      : `rond ${String(Math.round(bestStart)).padStart(2, '0')}:00`;
+
     if (candidateStarts.length === 0 && d === 0) {
       teeTimeLabel = 'Te laat voor volledige ronde vóór donker';
       flexibilityLabel = 'Daglicht voorbij';
     } else if (d <= 1) {
-      if (spanHours >= 2.25) {
+      if (coverageRatio >= 0.7 && scoreSpread < 6) {
         flexibilityLabel = 'Hele dag stabiel';
         teeTimeLabel = `Start ${formatDecimalHour(windowStartMin)} – ${formatDecimalHour(windowStartMax)}`;
       } else if (spanHours >= 0.75) {
@@ -642,22 +717,39 @@ function analyzeCourse7Days(course) {
         teeTimeLabel = `Afslag ${formatDecimalHour(bestStart)} (finish ${formatDecimalHour(bestStart + roundHours)})`;
       }
     } else if (d <= 3) {
-      const hFrom = Math.floor(windowStartMin);
-      const hTo = Math.ceil(windowStartMax);
       teeTimeLabel = hTo - hFrom >= 2
         ? `Start tussen ${String(hFrom).padStart(2, '0')}:00 – ${String(hTo).padStart(2, '0')}:00`
         : `Rond ${String(Math.round(bestStart)).padStart(2, '0')}:00 uur`;
       flexibilityLabel = hTo - hFrom >= 2 ? 'Ruim venster' : 'Uur-indicatie';
     } else {
-      if (spanHours >= 2.5) {
-        teeTimeLabel = 'Hele dag geschikt';
-        flexibilityLabel = 'Dagdeel-indicatie';
-      } else if (bestStart < 12) {
-        teeTimeLabel = 'Ochtend (09:00 – 12:30)';
-        flexibilityLabel = 'Dagdeel-indicatie';
+      flexibilityLabel = 'Trend-indicatie';
+      const isTrulyFlat = scoreSpread < 6 && coverageRatio >= 0.72;
+      const afternoonBetter = afternoonMax !== null && morningMax !== null && (
+        (afternoonMax - morningMax >= 4) ||
+        (afternoonAvg - morningAvg >= 4) ||
+        (bestStart >= 12 && windowStartMin >= 11.25)
+      );
+      const morningBetter = morningMax !== null && afternoonMax !== null && (
+        (morningMax - afternoonMax >= 4) ||
+        (morningAvg - afternoonAvg >= 4) ||
+        (bestStart < 11.5 && windowStartMax <= 12.25)
+      );
+      const middayPeak = windowStartMin >= 10.25 && windowStartMax <= 14.5 && scoreSpread >= 6;
+      const prefix = bestScore >= 60 ? 'Trend: beter in de' : 'Trend: beste kans in de';
+
+      if (isTrulyFlat) {
+        if (bestScore >= 72) teeTimeLabel = 'Trend: hele dag stabiel goed';
+        else if (bestScore >= 60) teeTimeLabel = 'Trend: hele dag gelijkmatig';
+        else if (bestScore >= 48) teeTimeLabel = 'Trend: hele dag matig';
+        else teeTimeLabel = 'Trend: hele dag ongunstig';
+      } else if (afternoonBetter && !morningBetter) {
+        teeTimeLabel = `${prefix} middag (${approxRange})`;
+      } else if (morningBetter && !afternoonBetter) {
+        teeTimeLabel = `${prefix} ochtend (${approxRange})`;
+      } else if (middayPeak) {
+        teeTimeLabel = `Trend: rond de middag (${approxRange})`;
       } else {
-        teeTimeLabel = 'Middag (12:30 – 16:00)';
-        flexibilityLabel = 'Dagdeel-indicatie';
+        teeTimeLabel = `Trend: voorkeur ${approxRange}`;
       }
     }
 
@@ -669,8 +761,9 @@ function analyzeCourse7Days(course) {
     const dayTitle = d === 0 ? 'Vandaag' : d === 1 ? 'Morgen' : weekdayLong.charAt(0).toUpperCase() + weekdayLong.slice(1);
     const dayPill = d === 0 ? 'Vandaag' : d === 1 ? 'Morgen' : weekdayShort.charAt(0).toUpperCase() + weekdayShort.slice(1);
 
-    const caddieTip = buildCaddieAdvice(rep, course, hourRows, bestStart, roundHours);
-    const clothing = d <= 1 ? buildClothingAdvice(rep, course, bestStart) : null;
+    const uvMax = +(daily.uv_index_max?.[d] ?? Math.max(...hourRows.map(r => r.uv || 0))).toFixed(1);
+    const caddieTip = buildCaddieAdvice(rep, course, hourRows, bestStart, roundHours, uvMax);
+    const clothing = d <= 1 ? buildClothingAdvice(rep, course, bestStart, uvMax) : null;
 
     days.push({
       dayIndex: d,
@@ -695,6 +788,9 @@ function analyzeCourse7Days(course) {
       latestStart,
       temp: rep.temp,
       appTemp: rep.appTemp,
+      uv: rep.uv,
+      uvMax,
+      humidity: rep.humidity,
       wind: rep.wind,
       gusts: rep.gusts,
       windDir: rep.windDir,
@@ -713,11 +809,26 @@ function analyzeCourse7Days(course) {
   return days;
 }
 
-function buildCaddieAdvice(rep, course, hourRows, bestStart, roundHours) {
+function buildCaddieAdvice(rep, course, hourRows, bestStart, roundHours, uvMax = 0) {
   const tips = [];
   if (rep.temp <= 3) tips.push('Kans op nachtvorst/rijp: check wintergreens en reken op 1 tot 1,5 club minder lengte.');
   else if (rep.appTemp <= 9) tips.push(`Frisse omstandigheden (${rep.appTemp}°C gevoel): de bal vliegt ca. 5% minder ver, neem een extra club.`);
-  else if (rep.appTemp >= 23) tips.push('Warme, droge lucht: de bal draagt verder en rolt extra door op de fairways.');
+  else if (rep.appTemp >= 28) {
+    const shadeNote = course.windFactor <= 0.85
+      ? `${course.name} biedt welkome schaduw tussen de bomen`
+      : `op het open terrein van ${course.name} is weinig schaduw`;
+    tips.push(`Hittebelasting (${rep.appTemp}°C gevoel): drink elke 2–3 holes water/elektrolyten en zoek schaduw (${shadeNote}).`);
+  } else if (rep.appTemp >= 23) {
+    const humidNote = rep.humidity >= 72
+      ? ' Let op vochtige/benauwde lucht: neem een extra handschoen of handdoek mee voor grip.'
+      : '';
+    tips.push(`Warme lucht: de bal draagt verder en rolt extra door op de fairways.${humidNote}`);
+  }
+
+  const peakUv = Math.max(rep.uv || 0, uvMax || 0);
+  if (peakUv >= 6) {
+    tips.push(`Hoge zonkracht (UV ${Math.round(peakUv)}): smeer elke 2 uur SPF 30–50 en draag pet of zonnebril.`);
+  }
 
   if (rep.wind >= 22) tips.push(`Stevige wind (${rep.wind} km/u ${rep.windDir}, vlagen ${rep.gusts} km/u): sla lage punch-shots bij tegenwind.`);
   else if (course.windFactor <= 0.85) tips.push(`${course.name} ligt goed beschut tussen de bomen; houd hoog in de boomtoppen wel rekening met wind.`);
@@ -729,7 +840,7 @@ function buildCaddieAdvice(rep, course, hourRows, bestStart, roundHours) {
   return tips.join(' ');
 }
 
-function buildClothingAdvice(rep, course, bestStart) {
+function buildClothingAdvice(rep, course, bestStart, uvMax = 0) {
   let top = '';
   let badge = '';
 
@@ -750,9 +861,12 @@ function buildClothingAdvice(rep, course, bestStart) {
   } else if (rep.appTemp <= 18) {
     badge = 'Polo + lichte laag';
     top = 'Golfpolo + dun vest of lichte windbreaker voor de eerste holes.';
+  } else if (rep.appTemp >= 26) {
+    badge = 'Ultralicht & ademend (hitte)';
+    top = 'Lichte, sneldrogende golfpolo in een lichte kleur; voorkom oververhitting.';
   } else {
     badge = 'Korte mouw / luchtig';
-    top = 'Ademende golfpolo (korte mouw); zonnebrand mee.';
+    top = 'Ademende golfpolo (korte mouw); lichte stof.';
   }
 
   const bottom = rep.appTemp >= 21 && rep.prob < 25
@@ -760,8 +874,12 @@ function buildClothingAdvice(rep, course, bestStart) {
     : 'Lange golfbroek; waterdichte golfschoenen aanbevolen i.v.m. dauw/vocht.';
 
   const acc = [];
+  const peakUv = Math.max(rep.uv || 0, uvMax || 0);
   if (rep.appTemp <= 5) acc.push('muts/nekwarmer & winterhandschoenen');
   else if (rep.appTemp <= 8 && rep.wind >= 18) acc.push('dunne muts of oorwarmer voor de wind');
+  if (rep.appTemp >= 26) acc.push('extra water/elektrolyten & reservehandschoen (zweet)');
+  if (peakUv >= 6) acc.push(`zonnebrand SPF 30–50 (UV ${Math.round(peakUv)}) & pet/zonnebril`);
+  else if (peakUv >= 3) acc.push(`zonnebrand & pet/zonnebril (UV ${Math.round(peakUv)})`);
   if (rep.prob >= 35 || rep.precip > 0) acc.push('licht regenjack, stormparaplu & reservehandschoen');
   if (bestStart < 10.5) acc.push('extra dauwhanddoekje voor clubblad & bal');
   if (acc.length === 0) acc.push('pet/zonnebril & standaard golfhandschoen');
@@ -977,8 +1095,13 @@ function buildDaylightVisualHtml(d, plannerRow) {
   const segSunset = Math.max(0, pSunsetEnd - pDayEnd);
   const segDarkPm = Math.max(0, 100 - pSunsetEnd);
 
+  const hasGroupOverlap = Boolean(plannerRow?.hasOverlap && plannerRow.presenceStart !== null && plannerRow.presenceEnd !== null);
+  const wo = plannerRow?.weatherOverlap || null;
+  const hasGroupPlayable = Boolean(hasGroupOverlap && wo?.possible);
+  const playersLabel = hasGroupOverlap ? (plannerRow.availMembers || []).map(m => m.shortName).join(' & ') : '';
+
   let bestOverlayHtml = '';
-  if (d.hasPlayableWindow) {
+  if (!hasGroupPlayable && d.hasPlayableWindow) {
     const bLeft = pct(d.bestStart);
     const bRight = pct(d.bestStart + d.roundHours);
     if (bRight > bLeft) {
@@ -986,21 +1109,88 @@ function buildDaylightVisualHtml(d, plannerRow) {
     }
   }
 
+  let cutoffTickHtml = '';
+  if (d.hasPlayableWindow) {
+    const latestLeft = pct(d.latestStart);
+    cutoffTickHtml = `<div class="daylight-cutoff-tick" style="left:${latestLeft.toFixed(2)}%;" title="Laatste afslag vóór donker (${formatDecimalHour(d.latestStart)})" aria-hidden="true"></div>`;
+  }
+
+  let headerSummaryHtml = '';
+  if (plannerRow?.confirmed) {
+    const m = String(plannerRow.confirmed).match(/(\d{1,2})[:.](\d{2})/);
+    let finishStr = '';
+    if (m) {
+      const cDec = parseInt(m[1], 10) + parseInt(m[2], 10) / 60;
+      finishStr = ` · finish ~${formatDecimalHour(cDec + d.roundHours, false)}`;
+    }
+    headerSummaryHtml = `<span class="text-[11px] font-medium text-[#163828]">Bevestigd <span class="font-mono-score">${escapeHtml(plannerRow.confirmed)}</span>${finishStr}</span>`;
+  } else if (hasGroupPlayable) {
+    headerSummaryHtml = `<span class="text-[11px] font-medium text-[#163828]">Advies (${escapeHtml(playersLabel)}): <span class="font-mono-score">${escapeHtml(wo.label)}</span> · cijfer <span class="font-mono-score">${formatWeatherGrade(wo.score)}</span></span>`;
+  } else if (hasGroupOverlap && wo && !wo.possible) {
+    headerSummaryHtml = `<span class="text-[11px] font-medium text-[#755c2e]">${escapeHtml(wo.reason)}</span>`;
+  }
+
   let overlapTrackHtml = '';
-  if (plannerRow && (plannerRow.hasOverlap || plannerRow.count === 1 || plannerRow.confirmed)) {
-    let barHtml = '';
-    if (plannerRow.hasOverlap && plannerRow.overlapStart !== null && plannerRow.overlapEnd !== null) {
-      const oLeft = pct(plannerRow.overlapStart / 60);
-      const oRight = pct(plannerRow.overlapEnd / 60);
-      const playersLabel = plannerRow.availMembers.map(m => m.shortName).join(' & ');
-      if (oRight > oLeft) {
-        barHtml += `
-          <div class="overlap-timeline-bar overlap-timeline-bar-go" style="left:${oLeft.toFixed(2)}%;width:${Math.max(8, oRight - oLeft).toFixed(2)}%;">
-            ${escapeHtml(playersLabel)} · start ${escapeHtml(plannerRow.overlapText)}
-          </div>
-        `;
+  if (hasGroupOverlap) {
+    const pLeft = pct(plannerRow.presenceStart / 60);
+    const pRight = pct(plannerRow.presenceEnd / 60);
+    let trackInner = '';
+
+    if (pRight > pLeft) {
+      trackInner += `<div class="overlap-seg-presence" style="left:${pLeft.toFixed(2)}%;width:${(pRight - pLeft).toFixed(2)}%;" aria-hidden="true"></div>`;
+    }
+    if ((plannerRow.presenceEnd / 60) > d.playableLightEnd) {
+      const dtLeft = pct(Math.max(plannerRow.presenceStart / 60, d.playableLightEnd));
+      if (pRight > dtLeft) {
+        trackInner += `<div class="overlap-seg-dark-tail" style="left:${dtLeft.toFixed(2)}%;width:${(pRight - dtLeft).toFixed(2)}%;" aria-hidden="true"></div>`;
       }
-    } else if (plannerRow.count === 1 && plannerRow.availMembers[0]) {
+    }
+    if (hasGroupPlayable) {
+      const ftLeft = pct(wo.windowStartDec);
+      const ftRight = pct(Math.min(d.playableLightEnd, wo.windowEndDec + d.roundHours));
+      if (ftRight > ftLeft) {
+        trackInner += `<div class="overlap-seg-finish-tail" style="left:${ftLeft.toFixed(2)}%;width:${(ftRight - ftLeft).toFixed(2)}%;" aria-hidden="true"></div>`;
+      }
+      const fLeft = pct(wo.earliestStartDec);
+      const fRight = pct(Math.max(wo.earliestStartDec + 0.35, wo.latestStartDec));
+      trackInner += `<div class="overlap-seg-feasible" style="left:${fLeft.toFixed(2)}%;width:${Math.max(3, fRight - fLeft).toFixed(2)}%;" aria-hidden="true"></div>`;
+
+      const oLeft = pct(wo.windowStartDec);
+      const oRight = pct(Math.max(wo.windowStartDec + 0.35, wo.windowEndDec));
+      trackInner += `<div class="overlap-seg-optimal" style="left:${oLeft.toFixed(2)}%;width:${Math.max(3.5, oRight - oLeft).toFixed(2)}%;" aria-hidden="true"></div>`;
+    }
+    if (plannerRow.confirmed) {
+      const m = String(plannerRow.confirmed).match(/(\d{1,2})[:.](\d{2})/);
+      if (m) {
+        const cDec = parseInt(m[1], 10) + parseInt(m[2], 10) / 60;
+        const cLeft = pct(cDec);
+        trackInner += `<div class="overlap-timeline-confirmed-pin" style="left:${cLeft.toFixed(2)}%;" title="Bevestigde starttijd ${escapeHtml(plannerRow.confirmed)}" aria-hidden="true"></div>`;
+      }
+    }
+
+    let rightTrackLabel = '';
+    if (plannerRow.confirmed) {
+      rightTrackLabel = `<span class="font-mono-score font-medium text-[#18241e]">Bevestigd ${escapeHtml(plannerRow.confirmed)}</span>`;
+    } else if (hasGroupPlayable) {
+      rightTrackLabel = wo.feasibleLabel === wo.windowRangeStr
+        ? `<span>Start mogelijk &amp; optimaal: <span class="font-mono-score font-semibold text-[#163828]">${escapeHtml(wo.windowRangeStr)}</span></span>`
+        : `<span>Start mogelijk <span class="font-mono-score">${escapeHtml(wo.feasibleLabel)}</span> · Beste: <span class="font-mono-score font-semibold text-[#163828]">${escapeHtml(wo.windowRangeStr)}</span></span>`;
+    } else if (wo && !wo.possible) {
+      rightTrackLabel = `<span class="text-[#755c2e]">${escapeHtml(wo.reason)}</span>`;
+    }
+
+    overlapTrackHtml = `
+      <div class="space-y-1">
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#66706a]">
+          <span>${escapeHtml(playersLabel)} · aanwezig <span class="font-mono-score">${escapeHtml(plannerRow.presenceText)}</span></span>
+          ${rightTrackLabel}
+        </div>
+        <div class="overlap-timeline-track">${trackInner}</div>
+      </div>
+    `;
+  } else if (plannerRow && (plannerRow.count === 1 || plannerRow.confirmed)) {
+    let barHtml = '';
+    if (plannerRow.count === 1 && plannerRow.availMembers[0]) {
       const solo = plannerRow.availMembers[0];
       const pSolo = plannerRow.parsed[solo.key];
       const oLeft = pct(pSolo.startMins / 60);
@@ -1013,7 +1203,6 @@ function buildDaylightVisualHtml(d, plannerRow) {
         `;
       }
     }
-
     if (plannerRow.confirmed) {
       const m = String(plannerRow.confirmed).match(/(\d{1,2})[:.](\d{2})/);
       if (m) {
@@ -1022,7 +1211,6 @@ function buildDaylightVisualHtml(d, plannerRow) {
         barHtml += `<div class="overlap-timeline-confirmed-pin" style="left:${cLeft.toFixed(2)}%;" title="Bevestigde starttijd ${escapeHtml(plannerRow.confirmed)}" aria-hidden="true"></div>`;
       }
     }
-
     if (barHtml) {
       overlapTrackHtml = `
         <div class="space-y-1">
@@ -1041,7 +1229,16 @@ function buildDaylightVisualHtml(d, plannerRow) {
   const tilesHtml = visibleHours.map(r => {
     const hb = scoreBadgeMeta(r.score);
     const phase = getHourLightPhase(r.hour, d.sunriseDec, d.sunsetDec, d.playableLightEnd);
-    const inBest = d.hasPlayableWindow && phase !== 'dark' && r.hour >= Math.floor(d.bestStart) && r.hour < Math.ceil(d.bestStart + d.roundHours);
+
+    let inBest = false;
+    let isOutsideAvail = false;
+    if (hasGroupPlayable) {
+      inBest = phase !== 'dark' && r.hour >= Math.floor(wo.windowStartDec) && r.hour <= Math.floor(wo.windowEndDec);
+      const inPresence = r.hour >= Math.floor(plannerRow.presenceStart / 60) && r.hour < Math.ceil(Math.min(plannerRow.presenceEnd / 60, d.playableLightEnd));
+      isOutsideAvail = !inPresence && phase !== 'dark';
+    } else {
+      inBest = d.hasPlayableWindow && phase !== 'dark' && r.hour >= Math.floor(d.bestStart) && r.hour < Math.ceil(d.bestStart + d.roundHours);
+    }
 
     const phaseMeta = phase === 'daylight'
       ? { cls: 'hour-tile-daylight', label: 'Daglicht' }
@@ -1052,22 +1249,45 @@ function buildDaylightVisualHtml(d, plannerRow) {
           : { cls: 'hour-tile-dark', label: 'Donker' };
 
     return `
-      <div class="hour-tile ${phaseMeta.cls} ${inBest ? 'hour-tile-best' : ''}">
+      <div class="hour-tile ${phaseMeta.cls} ${inBest ? 'hour-tile-best' : ''} ${isOutsideAvail ? 'hour-tile-outside' : ''}">
         <div class="text-[10px] font-mono-score font-medium text-[#535d57] mb-1">
           <span>${String(r.hour).padStart(2, '0')}u</span>${inBest ? '<span class="text-[#b89652] ml-0.5" aria-hidden="true">★</span>' : ''}
-          <span class="visually-hidden">${phaseMeta.label}${inBest ? ', beste speelvenster' : ''}</span>
+          <span class="visually-hidden">${phaseMeta.label}${inBest ? ', beste speelvenster' : isOutsideAvail ? ', buiten beschikbaarheid' : ''}</span>
         </div>
-        <div class="font-mono-score text-[11px] font-semibold py-0.5 px-0.5 rounded border whitespace-nowrap" style="${hb.tintStyle}">${formatWeatherGrade(r.score)}</div>
+        <div class="hour-score-pill font-mono-score text-[11px] font-semibold py-0.5 px-0.5 rounded border whitespace-nowrap" style="${hb.tintStyle}">${formatWeatherGrade(r.score)}</div>
         <div class="text-[10px] font-mono-score mt-1">${r.temp}°</div>
         <div class="hour-tile-sub text-[9px] font-mono-score">${r.prob}%</div>
       </div>
     `;
   }).join('');
 
+  const legendHtml = hasGroupPlayable
+    ? `
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#66706a]">
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-day" aria-hidden="true"></span>Daglicht</span>
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-twilight" aria-hidden="true"></span>Schemering</span>
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-dark" aria-hidden="true"></span>Donker</span>
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-presence" aria-hidden="true"></span>Aanwezig</span>
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-feasible" aria-hidden="true"></span>Start mogelijk</span>
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-optimal" aria-hidden="true"></span>Beste afslag</span>
+      </div>
+    `
+    : `
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#66706a]">
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-day" aria-hidden="true"></span>Daglicht</span>
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-twilight" aria-hidden="true"></span>Schemering</span>
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-dark" aria-hidden="true"></span>Donker</span>
+        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-best" aria-hidden="true"></span>Beste venster</span>
+      </div>
+    `;
+
   return `
     <div class="bg-white rounded-lg p-3.5 border border-[#e6e3db] space-y-3">
       <div class="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 class="text-xs font-semibold text-[#18241e]">Verloop per uur</h3>
+        <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+          <h3 class="text-xs font-semibold text-[#18241e]">Verloop per uur</h3>
+          ${headerSummaryHtml}
+        </div>
         <span class="text-[11px] text-[#66706a] font-mono-score">${String(startHour).padStart(2, '0')}:00 – ${String(endHour).padStart(2, '0')}:00</span>
       </div>
 
@@ -1079,6 +1299,7 @@ function buildDaylightVisualHtml(d, plannerRow) {
           ${segSunset > 0 ? `<div class="daylight-seg daylight-seg-sunset" style="width:${segSunset.toFixed(2)}%"></div>` : ''}
           ${segDarkPm > 0 ? `<div class="daylight-seg daylight-seg-dark" style="width:${segDarkPm.toFixed(2)}%"></div>` : ''}
           ${bestOverlayHtml}
+          ${cutoffTickHtml}
         </div>
         ${overlapTrackHtml}
       </div>
@@ -1087,12 +1308,7 @@ function buildDaylightVisualHtml(d, plannerRow) {
         ${tilesHtml}
       </div>
 
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#66706a]">
-        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-day" aria-hidden="true"></span>Daglicht</span>
-        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-twilight" aria-hidden="true"></span>Schemering</span>
-        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-dark" aria-hidden="true"></span>Donker</span>
-        <span class="inline-flex items-center gap-1.5"><span class="daylight-legend-swatch daylight-swatch-best" aria-hidden="true"></span>Beste venster</span>
-      </div>
+      ${legendHtml}
     </div>
   `;
 }
@@ -1147,9 +1363,12 @@ function buildDayPlayersCardHtml(d, plannerRow, members, activeMember, course) {
       infoLines.push(`<span class="text-[#755c2e]">${escapeHtml(plannerRow.partialPairTip)}</span>`);
     }
     if (plannerRow.weatherOverlap?.possible) {
+      const sameAsFeasible = plannerRow.weatherOverlap.windowRangeStr === plannerRow.overlapText;
       infoLines.push(`
         <span class="text-[#1b3a2d] font-medium">
-          Weer-advies: ${escapeHtml(plannerRow.weatherOverlap.label)} · cijfer <span class="font-mono-score">${formatWeatherGrade(plannerRow.weatherOverlap.score)}</span>
+          ${sameAsFeasible
+            ? `Weercijfer <span class="font-mono-score">${formatWeatherGrade(plannerRow.weatherOverlap.score)}</span>`
+            : `Beste weer: ${escapeHtml(plannerRow.weatherOverlap.label)} · cijfer <span class="font-mono-score">${formatWeatherGrade(plannerRow.weatherOverlap.score)}</span>`}
         </span>
       `);
     } else if (plannerRow.weatherOverlap && !plannerRow.weatherOverlap.possible) {
@@ -1380,6 +1599,15 @@ function renderSingleCourse() {
           ? 'bg-[#fdfbf5] hover:bg-[#f8f3e6]'
           : 'hover:bg-[#faf9f5]';
 
+      let primaryTeeHtml = `<span class="font-medium text-[#163828]">${d.teeTimeLabel}</span>`;
+      if (isConfirmed) {
+        primaryTeeHtml = `<span class="font-medium text-[#163828]">Bevestigd <span class="font-mono-score">${escapeHtml(pRow.confirmed)}</span></span>`;
+      } else if (pRow?.hasOverlap && pRow?.weatherOverlap?.possible) {
+        primaryTeeHtml = `<span class="font-medium text-[#163828]">${escapeHtml(pRow.weatherOverlap.label)}</span>`;
+      } else if (pRow?.hasOverlap && pRow?.daylightBlocked) {
+        primaryTeeHtml = `<span class="font-medium text-[#755c2e]">Te laat vóór donker (licht tot ${d.lightUntil})</span>`;
+      }
+
       return `
         <article id="day-card-${d.dayIndex}" class="bg-white rounded-xl border ${isOpen ? 'border-[#163828]' : 'border-[#e6e3db]'} ${articleAccent} overflow-hidden transition">
           <button type="button" data-toggle-day="${d.dayIndex}" aria-expanded="${isOpen}" class="day-card-toggle w-full text-left px-4 py-3.5 sm:px-5 cursor-pointer ${headerBg} transition flex items-center justify-between gap-4">
@@ -1392,13 +1620,14 @@ function renderSingleCourse() {
                   ${collapsedStatusHtml}
                 </span>
                 <span class="block text-xs text-[#535d57]">
-                  <span class="font-medium text-[#163828]">${d.teeTimeLabel}</span>
+                  ${primaryTeeHtml}
                   <span class="text-[#cfc9bc] mx-1" aria-hidden="true">·</span>
                   <span class="font-mono-score">${d.temp}°C</span>
                   <span class="text-[#cfc9bc] mx-1" aria-hidden="true">·</span>
                   <span>${d.wind} km/u ${d.windDir}</span>
                   <span class="text-[#cfc9bc] mx-1" aria-hidden="true">·</span>
                   <span>${d.prob}% regen</span>
+                  ${d.uvMax >= 5 ? `<span class="text-[#cfc9bc] mx-1" aria-hidden="true">·</span><span class="text-[#755c2e] font-medium">UV ${Math.round(d.uvMax)}</span>` : ''}
                 </span>
               </span>
             </span>
@@ -1420,7 +1649,7 @@ function renderSingleCourse() {
                 <div class="space-y-1 text-xs text-[#535d57] prose-note">
                   <p class="text-[#18241e] font-medium">${d.scoreReason}</p>
                   <p class="text-[#66706a]">
-                    Daglicht ${d.sunriseStr}–${d.sunsetStr}${d.twilightBonus > 0 ? `, licht tot ${d.lightUntil}` : ''}${alt ? ` · Beter op ${alt.courseName} (${formatWeatherGrade(alt.score)})` : ''}
+                    Daglicht ${d.sunriseStr}–${d.sunsetStr}${d.twilightBonus > 0 ? `, licht tot ${d.lightUntil}` : ''}${Math.abs(d.appTemp - d.temp) >= 2 ? ` · Gevoel ${d.appTemp}°C` : ''}${d.uvMax >= 3 ? ` · Max UV ${Math.round(d.uvMax)} (${getUvLevelLabel(d.uvMax)})` : ''}${alt ? ` · Beter op ${alt.courseName} (${formatWeatherGrade(alt.score)})` : ''}
                   </p>
                 </div>
                 <button type="button" data-share-day="${d.dayIndex}" class="course-action-btn px-2.5 py-1 rounded-md text-xs font-medium text-[#1b3a2d] hover:bg-[#f2f0ea] transition shrink-0">
@@ -1645,19 +1874,67 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+function getWrapLines(ctx, text, maxWidth) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines = [];
+  let line = '';
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line ? `${line} ${words[n]}` : words[n];
+    if (ctx.measureText(testLine).width > maxWidth && line) {
+      lines.push(line);
+      line = words[n];
+    } else {
+      line = testLine;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function truncateCanvasText(ctx, text, maxWidth) {
+  const str = String(text || '');
+  if (ctx.measureText(str).width <= maxWidth) return str;
+  let cut = str;
+  while (cut.length > 1 && ctx.measureText(`${cut}…`).width > maxWidth) {
+    cut = cut.slice(0, -1);
+  }
+  return `${cut}…`;
+}
+
 function renderScorecardPng() {
   const course = state.courses.find(c => c.id === state.selectedCourseId) || state.courses[0];
   const days = state.analysesByCourse[course.id] || [];
   if (!days.length) return;
 
+  const showGroup = $('chkShareGroup')?.checked ?? true;
   const showTips = $('chkShareTips')?.checked ?? true;
   const showAlts = $('chkShareAlts')?.checked ?? true;
+  const plannerData = window.SwingersPlanner?.getScheduleMapByDate?.() || null;
 
   const canvas = document.createElement('canvas');
   const scale = 2;
   const W = 760;
+
+  let dayLayout = null;
+  if (state.shareMode === 'day') {
+    const d = days[state.shareDayIndex] || days[0];
+    const pRow = plannerData?.byDate?.[d.dateIso] || null;
+    const hasGroupInfo = Boolean(showGroup && pRow && (pRow.confirmed || pRow.count > 0 || pRow.drMembers?.length > 0));
+    const measureCtx = canvas.getContext('2d');
+    measureCtx.font = '13px Inter, sans-serif';
+    const caddieLines = showTips ? getWrapLines(measureCtx, d.caddieTip, W - 96) : [];
+    const clothingLines = (showTips && d.clothing) ? getWrapLines(measureCtx, `${d.clothing.top} ${d.clothing.bottom}`, W - 96) : [];
+    const groupBlockH = hasGroupInfo ? 146 : 0;
+    const tipsBlockH = showTips
+      ? (18 + 22 + caddieLines.length * 19 + (d.clothing ? 22 + 22 + clothingLines.length * 19 : 0))
+      : 0;
+    const cardH = Math.max(150, 112 + groupBlockH + tipsBlockH + 22);
+    dayLayout = { d, pRow, hasGroupInfo, caddieLines, clothingLines, cardH };
+  }
+
   const H = state.shareMode === 'day'
-    ? 580
+    ? (136 + dayLayout.cardH + 40)
     : state.shareMode === 'matrix'
       ? Math.max(600, 214 + state.courses.length * 96)
       : 940;
@@ -1682,12 +1959,13 @@ function renderScorecardPng() {
 
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 25px Georgia, serif';
+  const activeDayForTitle = days[state.shareDayIndex] || days[0];
   const titleText = state.shareMode === 'matrix'
     ? 'Banen vergelijken'
     : state.shareMode === 'day'
-      ? `${days[state.shareDayIndex].dayTitle} (${days[state.shareDayIndex].dateShort}) — ${course.name}`
+      ? `${activeDayForTitle.dayTitle} (${activeDayForTitle.dateShort}) — ${course.name}`
       : `7-Daags Golfweer — ${course.name}`;
-  ctx.fillText(titleText, 28, 68);
+  ctx.fillText(truncateCanvasText(ctx, titleText, W - 56), 28, 68);
 
   ctx.fillStyle = '#d3e2d9';
   ctx.font = '500 13px Inter, sans-serif';
@@ -1710,7 +1988,7 @@ function renderScorecardPng() {
     ctx.fillText('Beste speeldag', 44, 158);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 17px Georgia, serif';
-    ctx.fillText(`${best.dayTitle} (${best.dateShort}) — ${best.teeTimeLabel}`, 44, 182);
+    ctx.fillText(truncateCanvasText(ctx, `${best.dayTitle} (${best.dateShort}) — ${best.teeTimeLabel}`, W - 180), 44, 182);
     ctx.fillStyle = '#d3e2d9';
     ctx.font = '12px Inter, sans-serif';
     ctx.fillText(`Licht tot ${best.lightUntil} · ${best.temp}°C · Wind ${best.wind} km/u ${best.windDir} · Regenkans ${best.prob}%`, 44, 200);
@@ -1730,10 +2008,15 @@ function renderScorecardPng() {
     // 7 rijen
     let y = 226;
     days.forEach(d => {
+      const pRow = showGroup ? (plannerData?.byDate?.[d.dateIso] || null) : null;
+      const isConfirmed = Boolean(pRow?.confirmed);
+      const isGo3 = !isConfirmed && pRow?.potentieel === 'GOGOGO' && pRow?.hasOverlap;
+      const isGo2 = !isConfirmed && pRow?.potentieel === 'GO' && pRow?.hasOverlap;
+
       roundRectPath(ctx, 28, y, W - 56, 88, 10);
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = (isConfirmed || isGo3) ? '#f7fbf8' : isGo2 ? '#fdfbf5' : '#ffffff';
       ctx.fill();
-      ctx.strokeStyle = '#e6e3db';
+      ctx.strokeStyle = isConfirmed ? '#163828' : isGo3 ? '#8bb89e' : isGo2 ? '#d4b66c' : '#e6e3db';
       ctx.lineWidth = 1;
       ctx.stroke();
 
@@ -1744,19 +2027,52 @@ function renderScorecardPng() {
       ctx.font = '12px Inter, sans-serif';
       ctx.fillText(`${d.dateShort} · Licht tot ${d.lightUntil}`, 44, y + 48);
 
+      const rowTee = isConfirmed
+        ? `Bevestigd ${pRow.confirmed}`
+        : (pRow?.hasOverlap && pRow?.weatherOverlap?.possible)
+          ? pRow.weatherOverlap.label
+          : d.teeTimeLabel;
+
       ctx.fillStyle = '#1b3a2d';
       ctx.font = '600 14px Inter, sans-serif';
-      ctx.fillText(d.teeTimeLabel, 215, y + 26);
+      ctx.fillText(truncateCanvasText(ctx, rowTee, 260), 215, y + 26);
+
+      if (isConfirmed || isGo3 || isGo2) {
+        const teeW = Math.min(260, ctx.measureText(rowTee).width);
+        const pillX = 215 + teeW + 10;
+        const names = (pRow.availMembers || []).map(m => m.shortName).join(' & ');
+        const pillText = isConfirmed
+          ? `✓ ${names || 'Bevestigd'}`
+          : isGo3
+            ? '3/3 GOGOGO'
+            : `2/3 GO${names ? ` · ${names}` : ''}`;
+        ctx.font = '600 10px Inter, sans-serif';
+        const pillMaxW = (W - 126) - pillX;
+        if (pillMaxW > 52) {
+          const safePillText = truncateCanvasText(ctx, pillText, pillMaxW - 14);
+          const pillW = ctx.measureText(safePillText).width + 14;
+          roundRectPath(ctx, pillX, y + 12, pillW, 18, 5);
+          ctx.fillStyle = isConfirmed ? '#163828' : isGo3 ? '#1b5e3d' : '#f3e5c0';
+          ctx.fill();
+          if (isGo2) {
+            ctx.strokeStyle = '#c8a24b';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+          ctx.fillStyle = (isConfirmed || isGo3) ? '#ffffff' : '#4f380d';
+          ctx.fillText(safePillText, pillX + 7, y + 24);
+        }
+      }
 
       ctx.fillStyle = '#535d57';
       ctx.font = '12px Inter, sans-serif';
       let subLine = `${d.temp}°C (gevoel ${d.appTemp}°C) · Wind ${d.wind} km/u ${d.windDir} · Regen ${d.prob}%`;
       if (showTips && d.clothing) subLine += ` · ${d.clothing.badge}`;
-      ctx.fillText(subLine, 215, y + 45);
+      ctx.fillText(truncateCanvasText(ctx, subLine, W - 345), 215, y + 45);
 
       ctx.fillStyle = '#66706a';
       ctx.font = 'italic 11px Inter, sans-serif';
-      ctx.fillText(d.scoreReason, 215, y + 63);
+      ctx.fillText(truncateCanvasText(ctx, d.scoreReason, W - 345), 215, y + 63);
 
       if (showAlts) {
         const alt = findBestAlternative(d.dayIndex, course.id);
@@ -1767,14 +2083,15 @@ function renderScorecardPng() {
         }
       }
 
-      const dm = scoreBadgeMeta(d.score);
+      const rowScore = (pRow?.hasOverlap && pRow?.weatherOverlap?.possible) ? pRow.weatherOverlap.score : d.score;
+      const dm = scoreBadgeMeta(rowScore);
       roundRectPath(ctx, W - 114, y + 18, 70, 52, 10);
       ctx.fillStyle = dm.hex;
       ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 20px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(formatWeatherGrade(d.score), W - 79, y + 45);
+      ctx.fillText(formatWeatherGrade(rowScore), W - 79, y + 45);
       ctx.font = '600 10px Inter, sans-serif';
       ctx.fillText(dm.label, W - 79, y + 60);
       ctx.textAlign = 'left';
@@ -1782,26 +2099,38 @@ function renderScorecardPng() {
       y += 96;
     });
   } else if (state.shareMode === 'day') {
-    const d = days[state.shareDayIndex] || days[0];
-    const dm = scoreBadgeMeta(d.score);
+    const { d, pRow, hasGroupInfo, caddieLines, clothingLines, cardH } = dayLayout;
+    const badgeScore = (hasGroupInfo && pRow.hasOverlap && pRow.weatherOverlap?.possible)
+      ? pRow.weatherOverlap.score
+      : d.score;
+    const dm = scoreBadgeMeta(badgeScore);
 
-    roundRectPath(ctx, 28, 138, W - 56, 390, 12);
+    roundRectPath(ctx, 28, 136, W - 56, cardH, 12);
     ctx.fillStyle = '#ffffff';
     ctx.fill();
     ctx.strokeStyle = '#e6e3db';
+    ctx.lineWidth = 1;
     ctx.stroke();
 
-    ctx.fillStyle = '#1b3a2d';
+    const heroLine = (hasGroupInfo && pRow.confirmed)
+      ? `Bevestigde starttijd: ${pRow.confirmed}`
+      : (hasGroupInfo && pRow.hasOverlap && pRow.weatherOverlap?.possible)
+        ? `Voorstel: ${pRow.weatherOverlap.label}`
+        : (hasGroupInfo && pRow.hasOverlap && pRow.daylightBlocked)
+          ? `Te laat vóór donker (licht tot ${d.lightUntil})`
+          : d.teeTimeLabel;
+
+    ctx.fillStyle = (hasGroupInfo && pRow.daylightBlocked && !pRow.confirmed) ? '#755c2e' : '#1b3a2d';
     ctx.font = 'bold 20px Inter, sans-serif';
-    ctx.fillText(d.teeTimeLabel, 48, 178);
+    ctx.fillText(truncateCanvasText(ctx, heroLine, W - 204), 48, 176);
 
     ctx.fillStyle = '#535d57';
     ctx.font = '14px Inter, sans-serif';
-    ctx.fillText(`${d.temp}°C (gevoel ${d.appTemp}°C)  ·  Wind ${d.wind} km/u ${d.windDir}  ·  Regen ${d.prob}%  ·  Licht tot ${d.lightUntil}`, 48, 206);
+    ctx.fillText(`${d.temp}°C (gevoel ${d.appTemp}°C)  ·  Wind ${d.wind} km/u ${d.windDir}  ·  Regen ${d.prob}%  ·  Licht tot ${d.lightUntil}`, 48, 204);
 
     ctx.fillStyle = '#18241e';
     ctx.font = '600 12px Inter, sans-serif';
-    ctx.fillText(d.scoreReason, 48, 234);
+    ctx.fillText(truncateCanvasText(ctx, d.scoreReason, W - 204), 48, 228);
 
     roundRectPath(ctx, W - 134, 154, 86, 62, 10);
     ctx.fillStyle = dm.hex;
@@ -1809,25 +2138,151 @@ function renderScorecardPng() {
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 24px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(formatWeatherGrade(d.score), W - 91, 188);
+    ctx.fillText(formatWeatherGrade(badgeScore), W - 91, 188);
     ctx.font = '600 11px Inter, sans-serif';
     ctx.fillText(dm.label, W - 91, 206);
     ctx.textAlign = 'left';
 
-    ctx.fillStyle = '#18241e';
-    ctx.font = '600 13px Inter, sans-serif';
-    ctx.fillText('Caddie baanadvies', 48, 274);
-    ctx.fillStyle = '#535d57';
-    ctx.font = '13px Inter, sans-serif';
-    wrapCanvasText(ctx, d.caddieTip, 48, 296, W - 96, 19);
+    let curY = 248;
 
-    if (d.clothing) {
+    if (hasGroupInfo) {
+      const boxX = 48;
+      const boxW = W - 96;
+      const boxH = 128;
+      const isConfirmed = Boolean(pRow.confirmed);
+      const isGo3 = !isConfirmed && pRow.potentieel === 'GOGOGO' && pRow.hasOverlap;
+      const isGo2 = !isConfirmed && pRow.potentieel === 'GO' && pRow.hasOverlap;
+
+      roundRectPath(ctx, boxX, curY, boxW, boxH, 10);
+      ctx.fillStyle = '#faf8f3';
+      ctx.fill();
+      ctx.strokeStyle = '#e6e3db';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Subtiele linker accentbalk
+      ctx.save();
+      roundRectPath(ctx, boxX, curY, boxW, boxH, 10);
+      ctx.clip();
+      ctx.fillStyle = isConfirmed ? '#163828' : isGo3 ? '#1b5e3d' : isGo2 ? '#b89652' : '#8c867b';
+      ctx.fillRect(boxX, curY, 4, boxH);
+      ctx.restore();
+
+      ctx.fillStyle = '#535d57';
+      ctx.font = '600 11px Inter, sans-serif';
+      ctx.fillText('SWINGERSCLUB · BESCHIKBAARHEID', boxX + 14, curY + 22);
+
+      // Status pill rechtsboven in het vak
+      const pillLabel = isConfirmed
+        ? `BEVESTIGD ${pRow.confirmed}`
+        : isGo3
+          ? '3/3 GOGOGO'
+          : isGo2
+            ? '2/3 GO'
+            : `${pRow.count}/3 BESCHIKBAAR`;
+      ctx.font = '600 10px Inter, sans-serif';
+      const pillW = ctx.measureText(pillLabel).width + 16;
+      const pillX = boxX + boxW - 14 - pillW;
+      roundRectPath(ctx, pillX, curY + 9, pillW, 19, 5);
+      ctx.fillStyle = isConfirmed ? '#163828' : isGo3 ? '#1b5e3d' : isGo2 ? '#f3e5c0' : '#f2f0ea';
+      ctx.fill();
+      ctx.strokeStyle = isConfirmed ? '#163828' : isGo3 ? '#1b5e3d' : isGo2 ? '#c8a24b' : '#d6d2c7';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = (isConfirmed || isGo3) ? '#ffffff' : isGo2 ? '#4f380d' : '#535d57';
+      ctx.fillText(pillLabel, pillX + 8, curY + 22);
+
+      // 3 speler-kaartjes
+      const members = plannerData?.members || [];
+      const cardGap = 8;
+      const mW = (boxW - 28 - cardGap * 2) / 3;
+      const availPalette = {
+        'avail-yes': { bg: '#f1f6f3', border: '#c7dcd0', ink: '#1b4332' },
+        'avail-partial': { bg: '#faf7ef', border: '#e3d6b8', ink: '#5c4518' },
+        'avail-maybe': { bg: '#f3f6f8', border: '#ccd7e0', ink: '#2a4354' },
+        'avail-dr': { bg: '#f6f4f8', border: '#d9d0e3', ink: '#4a3761' },
+        'avail-no': { bg: '#f5f4f0', border: '#e4e1d8', ink: '#626059' },
+        'avail-empty': { bg: '#ffffff', border: '#d6d2c7', ink: '#66706a' }
+      };
+
+      members.forEach((m, idx) => {
+        const p = pRow.parsed?.[m.key] || { cssClass: 'avail-empty', status: 'empty', displayLabel: '' };
+        const pal = availPalette[p.cssClass] || availPalette['avail-empty'];
+        const mx = boxX + 14 + idx * (mW + cardGap);
+        const my = curY + 35;
+
+        roundRectPath(ctx, mx, my, mW, 52, 7);
+        ctx.fillStyle = pal.bg;
+        ctx.fill();
+        ctx.strokeStyle = pal.border;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = pal.ink;
+        ctx.font = '600 11px Inter, sans-serif';
+        ctx.fillText(m.shortName, mx + 10, my + 19);
+
+        const valStr = p.status === 'empty'
+          ? 'Nog open'
+          : p.status === 'unavailable'
+            ? 'Kan niet'
+            : (p.displayLabel || p.raw || 'Beschikbaar');
+        ctx.font = '600 13px Inter, sans-serif';
+        ctx.fillText(truncateCanvasText(ctx, valStr, mW - 20), mx + 10, my + 39);
+      });
+
+      // Samenvattingsregel onderaan het Swingersclub-vak
+      const sumParts = [];
+      if (pRow.confirmed) {
+        sumParts.push(`Bevestigd om ${pRow.confirmed}`);
+        if (pRow.presenceText) sumParts.push(`aanwezig ${pRow.presenceText}`);
+      } else if (pRow.hasOverlap && pRow.weatherOverlap?.possible) {
+        sumParts.push(`Voorstel: ${pRow.weatherOverlap.label} (licht tot ${d.lightUntil})`);
+      } else if (pRow.hasOverlap && pRow.daylightBlocked) {
+        sumParts.push(pRow.weatherOverlap.reason);
+      } else if (pRow.count >= 2 && !pRow.hasOverlap) {
+        sumParts.push(pRow.shortRoundDetail || 'Geen overlappende starttijd');
+      } else if (pRow.singleAvailNote) {
+        sumParts.push(pRow.singleAvailNote);
+      } else if (pRow.drNote) {
+        sumParts.push(pRow.drNote);
+      }
+      if (pRow.bookerMember) sumParts.push(`Booker: ${pRow.bookerMember.shortName}`);
+      if (pRow.note) sumParts.push(pRow.note);
+
+      ctx.fillStyle = '#18241e';
+      ctx.font = '500 11px Inter, sans-serif';
+      ctx.fillText(truncateCanvasText(ctx, sumParts.join(' · '), boxW - 28), boxX + 14, curY + 110);
+
+      curY += 146;
+    }
+
+    if (showTips) {
+      curY += 18;
       ctx.fillStyle = '#18241e';
       ctx.font = '600 13px Inter, sans-serif';
-      ctx.fillText('Kledingadvies', 48, 385);
+      ctx.fillText('Caddie baanadvies', 48, curY);
+      curY += 22;
       ctx.fillStyle = '#535d57';
       ctx.font = '13px Inter, sans-serif';
-      wrapCanvasText(ctx, `${d.clothing.top} ${d.clothing.bottom}`, 48, 407, W - 96, 19);
+      caddieLines.forEach(line => {
+        ctx.fillText(line, 48, curY);
+        curY += 19;
+      });
+
+      if (d.clothing) {
+        curY += 22;
+        ctx.fillStyle = '#18241e';
+        ctx.font = '600 13px Inter, sans-serif';
+        ctx.fillText('Kledingadvies', 48, curY);
+        curY += 22;
+        ctx.fillStyle = '#535d57';
+        ctx.font = '13px Inter, sans-serif';
+        clothingLines.forEach(line => {
+          ctx.fillText(line, 48, curY);
+          curY += 19;
+        });
+      }
     }
   } else {
     // Matrix mode
@@ -1889,33 +2344,100 @@ function renderScorecardPng() {
 }
 
 function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
-  const words = text.split(' ');
-  let line = '';
-  let curY = y;
-  for (let n = 0; n < words.length; n++) {
-    const testLine = line + words[n] + ' ';
-    if (ctx.measureText(testLine).width > maxWidth && n > 0) {
-      ctx.fillText(line.trim(), x, curY);
-      line = words[n] + ' ';
-      curY += lineHeight;
-    } else {
-      line = testLine;
-    }
-  }
-  ctx.fillText(line.trim(), x, curY);
+  const lines = getWrapLines(ctx, text, maxWidth);
+  lines.forEach((line, idx) => ctx.fillText(line, x, y + idx * lineHeight));
 }
 
 function buildWhatsAppTextSummary() {
   const course = state.courses.find(c => c.id === state.selectedCourseId) || state.courses[0];
   const days = state.analysesByCourse[course.id] || [];
+  const showGroup = $('chkShareGroup')?.checked ?? true;
+  const showTips = $('chkShareTips')?.checked ?? true;
+  const plannerData = window.SwingersPlanner?.getScheduleMapByDate?.() || null;
+
+  if (state.shareMode === 'day') {
+    const d = days[state.shareDayIndex] || days[0];
+    if (!d) return '';
+    const pRow = plannerData?.byDate?.[d.dateIso] || null;
+    const hasGroupInfo = Boolean(showGroup && pRow && (pRow.confirmed || pRow.count > 0 || pRow.drMembers?.length > 0));
+    const badgeScore = (hasGroupInfo && pRow.hasOverlap && pRow.weatherOverlap?.possible)
+      ? pRow.weatherOverlap.score
+      : d.score;
+    const b = scoreBadgeMeta(badgeScore);
+
+    const lines = [
+      `⛳ *${hasGroupInfo ? 'Golfweer & Tee-Time Voorstel' : 'Golfweer Dagkaart'} — ${course.name}*`,
+      `📅 *${d.dayTitle} (${d.dateShort})* · ${state.holes} holes · Weercijfer *${formatWeatherGrade(badgeScore)}* (${b.label})`,
+      `🌤️ ${d.temp}°C (gevoel ${d.appTemp}°C) · Wind ${d.wind} km/u ${d.windDir} · Regen ${d.prob}% · Licht tot ${d.lightUntil}`,
+      ''
+    ];
+
+    if (hasGroupInfo) {
+      const members = plannerData?.members || [];
+      lines.push('*👥 Beschikbaarheid:*');
+      members.forEach(m => {
+        const p = pRow.parsed?.[m.key];
+        const val = !p || p.status === 'empty'
+          ? 'Nog open'
+          : p.status === 'unavailable'
+            ? 'Kan niet'
+            : (p.displayLabel || p.raw || 'Beschikbaar');
+        lines.push(`• ${m.name}: ${val}`);
+      });
+
+      if (pRow.confirmed) {
+        lines.push(`⛳ *Bevestigde starttijd:* ${pRow.confirmed}${pRow.presenceText ? ` (aanwezig ${pRow.presenceText})` : ''}`);
+      } else if (pRow.hasOverlap && pRow.weatherOverlap?.possible) {
+        lines.push(`⛳ *Voorstel afslag:* ${pRow.weatherOverlap.label} (aanwezig ${pRow.presenceText})`);
+      } else if (pRow.hasOverlap && pRow.daylightBlocked) {
+        lines.push(`⚠️ ${pRow.weatherOverlap.reason}`);
+      } else if (pRow.count >= 2 && !pRow.hasOverlap) {
+        lines.push(`⚠️ ${pRow.shortRoundDetail || 'Geen overlappende starttijd'}`);
+      }
+      if (pRow.bookerMember) {
+        lines.push(`📋 *Booker:* ${pRow.bookerMember.name}`);
+      }
+      if (pRow.note) {
+        lines.push(`📝 ${pRow.note}`);
+      }
+    } else {
+      lines.push(`⛳ *Beste tijd:* ${d.teeTimeLabel}`);
+    }
+
+    if (showTips) {
+      lines.push('', `💡 ${d.caddieTip}`);
+      if (d.clothing) {
+        lines.push(`👕 ${d.clothing.badge}`);
+      }
+    }
+
+    const hasProposal = Boolean(hasGroupInfo && pRow.hasOverlap && pRow.weatherOverlap?.possible && !pRow.confirmed);
+    lines.push('', hasProposal ? 'Bevestigen we deze? 🏌️‍♂️' : 'Wie haakt er aan? 🏌️‍♂️');
+    return lines.join('\n');
+  }
+
   const lines = [
     `⛳ *Golfweer Forecast — ${course.name}*`,
     `📍 ${course.city} | ${state.holes} holes (${state.holes === 9 ? '2,0' : '4,0'}u) | ${days[0]?.dateShort} t/m ${days[6]?.dateShort}`,
     ''
   ];
   days.forEach(d => {
-    const b = scoreBadgeMeta(d.score);
-    lines.push(`• *${d.dayTitle} (${d.dateShort})*: *${formatWeatherGrade(d.score)}* (${b.label}) — ${d.teeTimeLabel} | ${d.scoreReason}`);
+    const pRow = showGroup ? (plannerData?.byDate?.[d.dateIso] || null) : null;
+    const score = (pRow?.hasOverlap && pRow?.weatherOverlap?.possible) ? pRow.weatherOverlap.score : d.score;
+    const b = scoreBadgeMeta(score);
+    const tee = pRow?.confirmed
+      ? `Bevestigd ${pRow.confirmed}`
+      : (pRow?.hasOverlap && pRow?.weatherOverlap?.possible)
+        ? pRow.weatherOverlap.label
+        : d.teeTimeLabel;
+    let groupTag = '';
+    if (pRow?.confirmed) groupTag = ' [Bevestigd]';
+    else if (pRow?.potentieel === 'GOGOGO' && pRow?.hasOverlap) groupTag = ' [3/3 GOGOGO]';
+    else if (pRow?.potentieel === 'GO' && pRow?.hasOverlap) {
+      const names = (pRow.availMembers || []).map(m => m.shortName).join(' & ');
+      groupTag = ` [2/3 GO${names ? ` · ${names}` : ''}]`;
+    }
+    lines.push(`• *${d.dayTitle} (${d.dateShort})*: *${formatWeatherGrade(score)}* (${b.label}) — ${tee}${groupTag} | ${d.scoreReason}`);
   });
   lines.push('', 'Wie haakt er aan? 🏌️‍♂️');
   return lines.join('\n');
@@ -2094,14 +2616,24 @@ function init() {
     });
   });
 
+  $('chkShareGroup')?.addEventListener('change', renderScorecardPng);
   $('chkShareTips')?.addEventListener('change', renderScorecardPng);
   $('chkShareAlts')?.addEventListener('change', renderScorecardPng);
+
+  const getSharePngFilename = () => {
+    const course = state.courses.find(c => c.id === state.selectedCourseId) || state.courses[0];
+    const days = course ? (state.analysesByCourse[course.id] || []) : [];
+    const dayDate = state.shareMode === 'day' ? days[state.shareDayIndex]?.dateIso : '';
+    return dayDate
+      ? `golfweer-${state.selectedCourseId}-${dayDate}.png`
+      : `golfweer-${state.selectedCourseId}.png`;
+  };
 
   $('btnDownloadPng')?.addEventListener('click', () => {
     if (!state.lastPngDataUrl) return;
     const a = document.createElement('a');
     a.href = state.lastPngDataUrl;
-    a.download = `golfweer-${state.selectedCourseId}.png`;
+    a.download = getSharePngFilename();
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2126,14 +2658,15 @@ function init() {
 
   $('btnShareNative')?.addEventListener('click', async () => {
     const st = $('shareStatusMsg');
+    const filename = getSharePngFilename();
     try {
       const blob = await (await fetch(state.lastPngDataUrl)).blob();
-      const file = new File([blob], `golfweer-${state.selectedCourseId}.png`, { type: 'image/png' });
+      const file = new File([blob], filename, { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
-          title: 'Golfweer Scorecard',
-          text: 'Golfweer voor komende week ⛳'
+          title: state.shareMode === 'day' ? 'Golfweer & Tee-Time Voorstel' : 'Golfweer Scorecard',
+          text: state.shareMode === 'day' ? 'Golfweer & voorstel starttijd ⛳' : 'Golfweer voor komende week ⛳'
         });
         return;
       }
@@ -2142,7 +2675,7 @@ function init() {
     // Fallback wanneer preview-iframe bestand-delen blokkeert
     const a = document.createElement('a');
     a.href = state.lastPngDataUrl;
-    a.download = `golfweer-${state.selectedCourseId}.png`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();

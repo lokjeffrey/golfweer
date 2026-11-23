@@ -444,17 +444,26 @@ function upsertRow(item) {
     );
     const maxFinish = Math.min(ovEndDec, weatherDay.playableLightEnd || 20);
     const latest = Math.floor((maxFinish - roundHours) * 4) / 4;
+    const limitedByLight = (weatherDay.playableLightEnd || 20) < ovEndDec;
 
     if (latest < earliest - 0.001) {
       if (ovStartDec >= (weatherDay.playableLightEnd || 20) - roundHours) {
         return {
           possible: false,
-          reason: `Te laat voor ${roundHours === 2 ? '9' : '18'} holes vóór donker (licht tot ${weatherDay.lightUntil})`
+          reason: `Te laat voor ${roundHours === 2 ? '9' : '18'} holes vóór donker (licht tot ${weatherDay.lightUntil})`,
+          earliestStartDec: earliest,
+          latestStartDec: latest,
+          lightUntil: weatherDay.lightUntil,
+          limitedByLight
         };
       }
       return {
         possible: false,
-        reason: `Overlap te kort voor ${roundHours === 2 ? '9' : '18'} holes (${roundHours}u nodig)`
+        reason: `Overlap te kort voor ${roundHours === 2 ? '9' : '18'} holes (${roundHours}u nodig)`,
+        earliestStartDec: earliest,
+        latestStartDec: latest,
+        lightUntil: weatherDay.lightUntil,
+        limitedByLight
       };
     }
 
@@ -490,16 +499,28 @@ function upsertRow(item) {
     const startMinStr = fmt(candidates[left].start);
     const startMaxStr = fmt(candidates[right].start);
     const bestStartStr = fmt(best.start);
+    const feasibleLabel = latest > earliest ? `${fmt(earliest)} – ${fmt(latest)}` : fmt(earliest);
+    const windowRangeStr = candidates[right].start > candidates[left].start
+      ? `${startMinStr} – ${startMaxStr}`
+      : bestStartStr;
     const label = candidates[right].start - candidates[left].start >= 0.5
       ? `Start ${startMinStr} – ${startMaxStr}`
       : `Afslag ${bestStartStr}`;
 
     return {
       possible: true,
+      earliestStartDec: earliest,
+      latestStartDec: latest,
+      feasibleLabel,
+      bestStartDec: best.start,
+      windowStartDec: candidates[left].start,
+      windowEndDec: candidates[right].start,
+      windowRangeStr,
       bestStartStr,
       label,
       score: best.score,
-      lightUntil: weatherDay.lightUntil
+      lightUntil: weatherDay.lightUntil,
+      limitedByLight
     };
   }
 
@@ -721,8 +742,20 @@ function upsertRow(item) {
       // Live Golfweer & optimale starttijd binnen overlap (voor de eerste 7 dagen)
       const weatherDay = weatherByDate[dateIso] || null;
       let weatherOverlap = null;
+      let lightLimited = false;
+      let daylightBlocked = false;
       if (weatherDay && hasOverlap && playingMembers.length >= 2) {
         weatherOverlap = computeWeatherTeeTimeInOverlap(overlapStart, overlapEnd, weatherDay);
+        if (weatherOverlap?.possible) {
+          teeStart = Math.round(weatherOverlap.earliestStartDec * 60);
+          teeEnd = Math.round(weatherOverlap.latestStartDec * 60);
+          overlapText = weatherOverlap.feasibleLabel;
+          lightLimited = Boolean(weatherOverlap.limitedByLight);
+        } else if (weatherOverlap && !weatherOverlap.possible) {
+          overlapText = 'Te laat vóór donker';
+          daylightBlocked = true;
+          lightLimited = true;
+        }
       }
 
       const shortWindowWarning = hasOverlap && playingMembers.length >= 2 && (overlapEnd - overlapStart) < roundMins;
@@ -745,6 +778,8 @@ function upsertRow(item) {
         presenceText,
         teeStart,
         teeEnd,
+        lightLimited,
+        daylightBlocked,
         overlapStart,
         overlapEnd,
         overlapText,
@@ -1206,7 +1241,11 @@ function upsertRow(item) {
               const metaParts = [];
               if (r.bookerMember) metaParts.push(`Booker: ${escapeHtml(r.bookerMember.shortName)}`);
               if (r.weatherDay && r.weatherOverlap?.possible) {
-                metaParts.push(`Weercijfer ${formatGrade(r.weatherOverlap.score)} · ${escapeHtml(r.weatherOverlap.label)}`);
+                if (r.weatherOverlap.windowRangeStr === r.overlapText) {
+                  metaParts.push(`Weercijfer ${formatGrade(r.weatherOverlap.score)}`);
+                } else {
+                  metaParts.push(`Weercijfer ${formatGrade(r.weatherOverlap.score)} · ${escapeHtml(r.weatherOverlap.label)}`);
+                }
               } else if (r.weatherOverlap && !r.weatherOverlap.possible) {
                 metaParts.push(escapeHtml(r.weatherOverlap.reason));
               }
@@ -1347,7 +1386,7 @@ function upsertRow(item) {
       if (r.overlapText) {
         const isNoOverlap = !r.hasOverlap;
         teeParts.push(`
-          <div class="font-mono-score text-xs font-medium ${isNoOverlap ? 'text-[#72363a]' : 'text-[#18241e]'}">
+          <div class="font-mono-score text-xs font-medium ${r.daylightBlocked ? 'text-[#755c2e]' : isNoOverlap ? 'text-[#72363a]' : 'text-[#18241e]'}">
             ${escapeHtml(r.overlapText)}
           </div>
         `);
@@ -1361,9 +1400,12 @@ function upsertRow(item) {
           teeParts.push(`<div class="text-[11px] text-[#755c2e]">${escapeHtml(r.partialPairTip)}</div>`);
         }
         if (r.weatherOverlap && r.weatherOverlap.possible && scoreMetaFn) {
+          const sameAsFeasible = r.weatherOverlap.windowRangeStr === r.overlapText;
           teeParts.push(`
             <div class="text-[11px] text-[#163828] font-medium">
-              Weer: ${escapeHtml(r.weatherOverlap.label)} · <span class="font-mono-score">${formatGrade(r.weatherOverlap.score)}</span>
+              ${sameAsFeasible
+                ? `Weer: cijfer <span class="font-mono-score">${formatGrade(r.weatherOverlap.score)}</span>`
+                : `Weer: ${escapeHtml(r.weatherOverlap.label)} · <span class="font-mono-score">${formatGrade(r.weatherOverlap.score)}</span>`}
             </div>
           `);
         } else if (r.weatherOverlap && !r.weatherOverlap.possible) {
