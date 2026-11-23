@@ -1083,8 +1083,9 @@ function buildDaylightVisualHtml(d, plannerRow) {
   `;
 }
 
-function buildDayPlayersCardHtml(d, plannerRow, members, activeMember) {
+function buildDayPlayersCardHtml(d, plannerRow, members, activeMember, course) {
   if (!plannerRow || !members) return '';
+  const activeCourse = course || state.courses.find(c => c.id === state.selectedCourseId) || state.courses[0];
 
   let statusPill = '';
   if (plannerRow.confirmed) {
@@ -1164,7 +1165,7 @@ function buildDayPlayersCardHtml(d, plannerRow, members, activeMember) {
     : (plannerRow.potentieel && plannerRow.hasOverlap ? 'Bevestig tee time' : 'Notitie');
 
   const bookingStatus = getCourseBookingStatus(
-    course,
+    activeCourse,
     d.dateIso,
     plannerRow.hasOverlap ? plannerRow.overlapEnd : null
   );
@@ -1372,7 +1373,7 @@ function renderSingleCourse() {
               ${buildDaylightVisualHtml(d, pRow)}
 
               <!-- Swingersclub beschikbaarheid -->
-              ${buildDayPlayersCardHtml(d, pRow, plannerData?.members, plannerData?.activeMember)}
+              ${buildDayPlayersCardHtml(d, pRow, plannerData?.members, plannerData?.activeMember, course)}
 
               <!-- Inklapbaar Caddie- & Kledingadvies -->
               <details class="advice-disclosure bg-white rounded-lg border border-[#e6e3db] px-3.5 py-2.5">
