@@ -21,6 +21,10 @@
   --gold-accent: var(--brass-accent);
 }
 
+html {
+  scroll-padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   line-height: 1.5;
@@ -28,6 +32,8 @@ body {
   color: var(--ink-primary);
   -webkit-font-smoothing: antialiased;
   text-align: start;
+  overflow-wrap: break-word;
+  padding-bottom: max(3.5rem, env(safe-area-inset-bottom, 0px));
 }
 
 h1, h2, h3, th {
@@ -193,6 +199,40 @@ h1, h2, h3, th {
 
 .tabpanels-stack {
   display: block;
+}
+
+.quick-day-strip {
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+
+.quick-day-strip > button {
+  scroll-snap-align: start;
+}
+
+@media (max-width: 639px) {
+  .club-tablist {
+    gap: 0.25rem;
+    padding: 0.25rem;
+  }
+  .club-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0.45rem 0.5rem;
+    font-size: 0.8125rem;
+    gap: 0.3rem;
+  }
+}
+
+@media (pointer: coarse) {
+  .club-tab,
+  .seg-btn,
+  .quiet-btn,
+  .header-ghost-btn,
+  .avail-cell-btn,
+  .quick-avail-opt {
+    min-block-size: 2.75rem;
+  }
 }
 
 /* ==========================================
@@ -856,6 +896,10 @@ dialog::backdrop {
     outline: 2px solid Highlight;
     outline-offset: 0;
   }
+  .quick-avail-opt[aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
   .planner-table tbody tr.planner-row-go th,
   .planner-table tbody tr.planner-row-gogogo th,
   .planner-table tbody tr.planner-row-confirmed th,
@@ -865,15 +909,66 @@ dialog::backdrop {
 }
 
 /* ==========================================
-   MOBILE STACKED CARD LAYOUT (CONTAINER QUERY)
+   QUICK AVAILABILITY DIALOG OPTIONS
    ========================================== */
-@container (width < 700px) {
+.quick-avail-opt {
+  min-block-size: 2.25rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d6cfc0;
+  background-color: var(--bg-surface);
+  color: var(--ink-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.quick-avail-opt:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--border-control);
+}
+
+.quick-avail-opt:focus-visible {
+  outline: 2px solid var(--club-green);
+  outline-offset: 1px;
+}
+
+.quick-avail-opt[data-quick-opt="hele dag"][aria-pressed="true"] {
+  background-color: #eef5f1;
+  border-color: #163828;
+  color: #163828;
+  font-weight: 600;
+}
+
+.quick-avail-opt[data-quick-opt="tijd"][aria-pressed="true"] {
+  background-color: #fdf8ea;
+  border-color: #b89652;
+  color: #755c2e;
+  font-weight: 600;
+}
+
+.quick-avail-opt[data-quick-opt="x"][aria-pressed="true"] {
+  background-color: #faf4f4;
+  border-color: #d6b6b9;
+  color: #72363a;
+  font-weight: 600;
+}
+
+@media (max-width: 767px) {
   .planner-table-wrapper {
     max-block-size: none;
     border: none;
     background: transparent;
     overflow: visible;
   }
+}
+
+/* ==========================================
+   MOBILE STACKED CARD LAYOUT (CONTAINER QUERY)
+   ========================================== */
+@container (width < 700px) {
   .planner-table,
   .planner-table tbody,
   .planner-table tr,

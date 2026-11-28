@@ -199,6 +199,15 @@ function upsertRow(item) {
     activeAvailType: 'teetime' // 'teetime' | 'dr'
   };
 
+  const quickAvailState = {
+    memberKey: 'ed',
+    drafts: {},
+    original: {},
+    timeExpanded: {},
+    timeConfig: {},
+    days: []
+  };
+
   const el = (id) => document.getElementById(id);
 
   // ============================================================
@@ -1798,6 +1807,289 @@ function upsertRow(item) {
     }
   }
 
+  // ============================================================
+  // 6b. SNELLE BESCHIKBAARHEID OPGEVEN (14-DAAGSE MOBIELE FLOW)
+  // ============================================================
+  function classifyQuickOption(rawValue) {
+    const raw = String(rawValue || '').trim();
+    if (!raw) return '';
+    const parsed = parseAvailability(raw);
+    if (parsed.status === 'unavailable') return 'x';
+    if (!parsed.isDR && /^(?:hele\s*dag|overdag|ja)$/i.test(raw)) return 'hele dag';
+    return 'tijd';
+  }
+
+  function parseQuickTimeConfig(rawValue) {
+    const raw = String(rawValue || '').trim();
+    const isDr = /\bdr\b/i.test(raw) || /driving\s*range/i.test(raw);
+    const matches = [...raw.matchAll(/(\d{1,2}[:.]\d{2})/g)].map(m => parseTimeStrToMins(m[1])).filter(v => v !== null);
+    if (/\btot\b/i.test(raw) && matches.length === 1) {
+      return { mode: 'tot', start: '09:00', end: minsToHHMM(matches[0]), isDr };
+    }
+    if (/(^|\b)(va|vanaf|na)\b/i.test(raw) && matches.length === 1) {
+      return { mode: 'va', start: minsToHHMM(matches[0]), end: '18:00', isDr };
+    }
+    if (matches.length >= 2) {
+      return { mode: 'tussen', start: minsToHHMM(matches[0]), end: minsToHHMM(matches[1]), isDr };
+    }
+    if (matches.length === 1) {
+      return { mode: 'va', start: minsToHHMM(matches[0]), end: '18:00', isDr };
+    }
+    return { mode: 'tussen', start: '12:00', end: '18:00', isDr };
+  }
+
+  function formatQuickTimeDraft(cfg) {
+    const mode = cfg?.mode || 'tussen';
+    const start = cfg?.start || '12:00';
+    const end = cfg?.end || '18:00';
+    let base = `${start}-${end}`;
+    if (mode === 'va') base = `va ${start}`;
+    else if (mode === 'tot') base = `tot ${end}`;
+    return formatWithAvailType(base, cfg?.isDr ? 'dr' : 'teetime');
+  }
+
+  function updateQuickAvailChangeCount() {
+    const countEl = el('quickAvailChangeCount');
+    if (!countEl) return;
+    let changed = 0;
+    quickAvailState.days.forEach(r => {
+      const next = (quickAvailState.drafts[r.dateIso] || '').trim();
+      const prev = (quickAvailState.original[r.dateIso] || '').trim();
+      if (next !== prev) changed++;
+    });
+    if (changed === 0) {
+      countEl.textContent = 'Geen wijzigingen';
+      countEl.className = 'text-xs text-[#66706a]';
+    } else {
+      countEl.textContent = changed === 1 ? '1 dag gewijzigd' : `${changed} dagen gewijzigd`;
+      countEl.className = 'text-xs font-semibold text-[#163828]';
+    }
+  }
+
+  function loadQuickAvailDrafts(memberKey) {
+    quickAvailState.memberKey = memberKey;
+    const schedule = buildComputedSchedule();
+    quickAvailState.days = schedule.rows.slice(0, 14);
+    quickAvailState.drafts = {};
+    quickAvailState.original = {};
+    quickAvailState.timeExpanded = {};
+    quickAvailState.timeConfig = {};
+
+    quickAvailState.days.forEach(r => {
+      const raw = (plannerState.rowsByDate[r.dateIso]?.[memberKey] || '').trim();
+      quickAvailState.drafts[r.dateIso] = raw;
+      quickAvailState.original[r.dateIso] = raw;
+      quickAvailState.timeConfig[r.dateIso] = parseQuickTimeConfig(raw);
+    });
+  }
+
+  function renderQuickAvailList() {
+    document.querySelectorAll('#quickAvailMemberPicker button[data-quick-member]').forEach(btn => {
+      btn.setAttribute('aria-pressed', String(btn.dataset.quickMember === quickAvailState.memberKey));
+    });
+
+    const listEl = el('quickAvailDaysList');
+    if (!listEl) return;
+
+    const scoreMetaFn = window.GolfWeerApp?.scoreBadgeMeta;
+    const otherMembers = MEMBERS.filter(m => m.key !== quickAvailState.memberKey);
+
+    listEl.innerHTML = quickAvailState.days.map(r => {
+      const raw = quickAvailState.drafts[r.dateIso] || '';
+      const opt = classifyQuickOption(raw);
+      const isExpanded = Boolean(quickAvailState.timeExpanded[r.dateIso]);
+      const cfg = quickAvailState.timeConfig[r.dateIso] || parseQuickTimeConfig(raw);
+      const isModified = raw.trim() !== (quickAvailState.original[r.dateIso] || '').trim();
+
+      const weatherChip = (r.weatherDay && scoreMetaFn)
+        ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-mono-score font-medium" style="${scoreMetaFn(r.weatherDay.score).tintStyle}">${formatGrade(r.weatherDay.score)} · ${r.weatherDay.temp}°</span>`
+        : '';
+
+      const othersSummary = otherMembers
+        .map(m => {
+          const p = r.parsed[m.key];
+          if (!p || p.status === 'empty' || p.status === 'unavailable') return '';
+          return `${m.shortName}: ${p.displayLabel}`;
+        })
+        .filter(Boolean)
+        .join(' · ');
+
+      const tijdLabel = opt === 'tijd' && raw ? raw : 'Tijd...';
+
+      return `
+        <div data-quick-day-card="${r.dateIso}" class="bg-white rounded-xl border ${isModified ? 'border-[#163828]' : 'border-[#e6e3db]'} p-3 space-y-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-sm font-semibold text-[#18241e]">${escapeHtml(r.dateMeta.displayDay)}</span>
+                <span class="text-xs text-[#66706a]">${escapeHtml(r.dateMeta.dateShort)}</span>
+                ${weatherChip}
+                ${isModified ? '<span class="text-[10px] font-semibold text-[#163828] bg-[#eef5f1] px-1.5 py-0.5 rounded">Aangepast</span>' : ''}
+              </div>
+              ${othersSummary ? `<p class="text-[11px] text-[#66706a] mt-0.5 truncate">${escapeHtml(othersSummary)}</p>` : ''}
+            </div>
+            ${r.confirmed ? `<span class="font-mono-score text-[11px] font-semibold px-2 py-0.5 rounded bg-[#163828] text-white">✓ ${escapeHtml(r.confirmed)}</span>` : ''}
+          </div>
+
+          <div class="grid grid-cols-4 gap-1.5">
+            <button type="button" data-quick-date="${r.dateIso}" data-quick-opt="hele dag" aria-pressed="${String(opt === 'hele dag')}" class="quick-avail-opt">Hele dag</button>
+            <button type="button" data-quick-date="${r.dateIso}" data-quick-opt="tijd" aria-pressed="${String(opt === 'tijd')}" class="quick-avail-opt truncate">${escapeHtml(tijdLabel)}</button>
+            <button type="button" data-quick-date="${r.dateIso}" data-quick-opt="x" aria-pressed="${String(opt === 'x')}" class="quick-avail-opt">× Niet</button>
+            <button type="button" data-quick-date="${r.dateIso}" data-quick-opt="" aria-pressed="${String(opt === '')}" class="quick-avail-opt">Wissen</button>
+          </div>
+
+          ${isExpanded ? `
+            <div class="bg-[#faf9f5] rounded-lg border border-[#e6e3db] p-2.5 space-y-2 text-xs">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="seg-group" role="group" aria-label="Tijdtype">
+                  <button type="button" data-quick-tmode="va" data-quick-date="${r.dateIso}" aria-pressed="${String(cfg.mode === 'va')}" class="seg-btn">Vanaf</button>
+                  <button type="button" data-quick-tmode="tot" data-quick-date="${r.dateIso}" aria-pressed="${String(cfg.mode === 'tot')}" class="seg-btn">Tot</button>
+                  <button type="button" data-quick-tmode="tussen" data-quick-date="${r.dateIso}" aria-pressed="${String(cfg.mode === 'tussen')}" class="seg-btn">Tussen</button>
+                </div>
+                <button type="button" data-quick-dr="${r.dateIso}" aria-pressed="${String(cfg.isDr)}" class="quiet-btn ${cfg.isDr ? 'bg-[#f6f4f8] border-[#4b3869] text-[#4b3869] font-semibold' : ''}">
+                  🎯 DR
+                </button>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                ${cfg.mode !== 'tot' ? `
+                  <div>
+                    <label class="block text-[11px] font-medium text-[#535d57] mb-0.5">Vanaf</label>
+                    <input type="time" step="900" data-quick-start="${r.dateIso}" value="${escapeHtml(cfg.start)}" class="w-full rounded-lg border border-[#8c867b] bg-white px-2.5 py-1.5 text-sm font-mono-score text-[#18241e]" />
+                  </div>
+                ` : ''}
+                ${cfg.mode !== 'va' ? `
+                  <div>
+                    <label class="block text-[11px] font-medium text-[#535d57] mb-0.5">Tot</label>
+                    <input type="time" step="900" data-quick-end="${r.dateIso}" value="${escapeHtml(cfg.end)}" class="w-full rounded-lg border border-[#8c867b] bg-white px-2.5 py-1.5 text-sm font-mono-score text-[#18241e]" />
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+
+    listEl.querySelectorAll('button[data-quick-opt]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const iso = btn.dataset.quickDate;
+        const opt = btn.dataset.quickOpt;
+        if (opt === 'tijd') {
+          const curOpt = classifyQuickOption(quickAvailState.drafts[iso] || '');
+          if (curOpt === 'tijd') {
+            quickAvailState.timeExpanded[iso] = !quickAvailState.timeExpanded[iso];
+          } else {
+            quickAvailState.timeExpanded[iso] = true;
+            const cfg = quickAvailState.timeConfig[iso] || parseQuickTimeConfig('');
+            quickAvailState.timeConfig[iso] = cfg;
+            quickAvailState.drafts[iso] = formatQuickTimeDraft(cfg);
+          }
+        } else {
+          quickAvailState.timeExpanded[iso] = false;
+          quickAvailState.drafts[iso] = opt;
+        }
+        renderQuickAvailList();
+      });
+    });
+
+    listEl.querySelectorAll('button[data-quick-tmode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const iso = btn.dataset.quickDate;
+        const cfg = quickAvailState.timeConfig[iso] || parseQuickTimeConfig('');
+        cfg.mode = btn.dataset.quickTmode;
+        quickAvailState.timeConfig[iso] = cfg;
+        quickAvailState.drafts[iso] = formatQuickTimeDraft(cfg);
+        renderQuickAvailList();
+      });
+    });
+
+    listEl.querySelectorAll('button[data-quick-dr]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const iso = btn.dataset.quickDr;
+        const cfg = quickAvailState.timeConfig[iso] || parseQuickTimeConfig('');
+        cfg.isDr = !cfg.isDr;
+        quickAvailState.timeConfig[iso] = cfg;
+        quickAvailState.drafts[iso] = formatQuickTimeDraft(cfg);
+        renderQuickAvailList();
+      });
+    });
+
+    listEl.querySelectorAll('input[data-quick-start]').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const iso = inp.dataset.quickStart;
+        const cfg = quickAvailState.timeConfig[iso] || parseQuickTimeConfig('');
+        cfg.start = inp.value || '12:00';
+        quickAvailState.timeConfig[iso] = cfg;
+        quickAvailState.drafts[iso] = formatQuickTimeDraft(cfg);
+        renderQuickAvailList();
+      });
+    });
+
+    listEl.querySelectorAll('input[data-quick-end]').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const iso = inp.dataset.quickEnd;
+        const cfg = quickAvailState.timeConfig[iso] || parseQuickTimeConfig('');
+        cfg.end = inp.value || '18:00';
+        quickAvailState.timeConfig[iso] = cfg;
+        quickAvailState.drafts[iso] = formatQuickTimeDraft(cfg);
+        renderQuickAvailList();
+      });
+    });
+
+    updateQuickAvailChangeCount();
+  }
+
+  function openQuickAvailDialog() {
+    const dialog = el('quickAvailDialog');
+    if (!dialog) return;
+    const preferredMember = ['tom', 'jeff', 'ed'].includes(plannerState.activeMember)
+      ? plannerState.activeMember
+      : quickAvailState.memberKey || 'ed';
+    loadQuickAvailDrafts(preferredMember);
+    renderQuickAvailList();
+    dialog.showModal();
+  }
+
+  function saveQuickAvailChanges() {
+    const memberKey = quickAvailState.memberKey;
+    const changedDates = [];
+    const prevBookers = {};
+
+    quickAvailState.days.forEach(r => {
+      const next = (quickAvailState.drafts[r.dateIso] || '').trim();
+      const prev = (quickAvailState.original[r.dateIso] || '').trim();
+      if (next !== prev) {
+        const current = plannerState.rowsByDate[r.dateIso] || { tom: '', jeff: '', ed: '', booker: '', bookerManual: false, confirmed: '', note: '' };
+        prevBookers[r.dateIso] = normalizeBookerKey(current.booker);
+        current[memberKey] = next;
+        plannerState.rowsByDate[r.dateIso] = current;
+        changedDates.push({ dateIso: r.dateIso, val: next });
+      }
+    });
+
+    el('quickAvailDialog')?.close();
+
+    if (changedDates.length === 0) return;
+
+    saveLocalData();
+    renderPlanner();
+    window.GolfWeerApp?.refreshSingleCourse?.();
+
+    const m = MEMBERS.find(x => x.key === memberKey);
+    const label = changedDates.length === 1 ? '1 dag' : `${changedDates.length} dagen`;
+    showPlannerStatus(`Beschikbaarheid van ${m ? m.name : memberKey} bijgewerkt voor ${label}.`, 'success');
+
+    const batchRows = changedDates.map(({ dateIso, val }) => {
+      const item = { date: dateIso, [memberKey]: val };
+      const updatedBooker = normalizeBookerKey(plannerState.rowsByDate[dateIso]?.booker);
+      if (updatedBooker !== prevBookers[dateIso]) {
+        item.booker = memberNameByKey(updatedBooker);
+      }
+      return item;
+    });
+    pushUpdateToGoogleSheet({ action: 'batchUpsert', rows: batchRows });
+  }
+
   function openSheetSyncDialog() {
     const dialog = el('sheetSyncDialog');
     if (!dialog) return;
@@ -1997,6 +2289,24 @@ function upsertRow(item) {
     // Beschikbaarheid Editor Dialog events
     el('btnCloseAvailDialog')?.addEventListener('click', () => el('availEditorDialog')?.close());
     el('btnCancelAvailDialog')?.addEventListener('click', () => el('availEditorDialog')?.close());
+
+    // Snelle beschikbaarheid modal events
+    el('btnQuickAvail')?.addEventListener('click', openQuickAvailDialog);
+    el('btnCloseQuickAvail')?.addEventListener('click', () => el('quickAvailDialog')?.close());
+    el('btnCancelQuickAvail')?.addEventListener('click', () => el('quickAvailDialog')?.close());
+    el('btnSaveQuickAvail')?.addEventListener('click', saveQuickAvailChanges);
+    el('quickAvailMemberPicker')?.querySelectorAll('button[data-quick-member]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const memberKey = btn.dataset.quickMember;
+        if (!['tom', 'jeff', 'ed'].includes(memberKey)) return;
+        plannerState.activeMember = memberKey;
+        saveLocalData();
+        loadQuickAvailDrafts(memberKey);
+        renderPlanner();
+        window.GolfWeerApp?.refreshSingleCourse?.();
+        renderQuickAvailList();
+      });
+    });
     el('availRawInput')?.addEventListener('input', () => {
       plannerState.activeTimeMode = null;
       updateTimeModeButtonsUi();
@@ -2182,6 +2492,9 @@ function upsertRow(item) {
       },
       openEditor(ctx) {
         openAvailEditor(ctx);
+      },
+      openQuickAvail() {
+        openQuickAvailDialog();
       },
       jumpToDate(dateIso) {
         if (plannerState.filter !== 'all') {

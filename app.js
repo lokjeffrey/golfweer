@@ -1022,6 +1022,11 @@ function renderCourseSelector() {
 
 function renderApp() {
   renderCourseSelector();
+  const settingsBar = $('courseSettingsBar');
+  if (settingsBar) {
+    settingsBar.classList.toggle('hidden', state.viewMode === 'planner');
+  }
+
   const singleCont = $('singleCourseContainer');
   const compareCont = $('compareCoursesContainer');
   const plannerCont = $('plannerContainer');
@@ -1503,7 +1508,7 @@ function renderSingleCourse() {
 
       return `
         <button type="button" data-jumpday="${d.dayIndex}"
-          class="min-w-[64px] rounded-xl px-2 py-2 text-center border transition flex flex-col items-center justify-center gap-1 ${cardSurfaceCls}">
+          class="shrink-0 min-w-[74px] sm:min-w-0 rounded-xl px-2 py-1.5 sm:py-2 text-center border transition flex flex-col items-center justify-center gap-0.5 sm:gap-1 ${cardSurfaceCls}">
           <span class="inline-flex items-center gap-1 text-[11px] font-medium">
             <span>${d.dayPill}</span>
             ${isBest ? `<span class="${isSelected ? 'text-[#e2c891]' : 'text-[#8f723d]'}" title="Beste dag" aria-hidden="true">★</span><span class="visually-hidden">(beste dag)</span>` : ''}
@@ -1542,11 +1547,11 @@ function renderSingleCourse() {
     }
 
     banner.innerHTML = `
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div class="space-y-1 min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <div class="inline-flex items-center gap-1.5 text-xs font-medium text-[#e2c891]">
-              <svg class="w-3.5 h-3.5 shrink-0" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <div class="flex items-center justify-between gap-3 sm:gap-4">
+        <div class="space-y-0.5 sm:space-y-1 min-w-0">
+          <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <div class="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-medium text-[#e2c891]">
+              <svg class="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                 <path d="M6 20V4l10 3.5L6 11" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M4 20h4" stroke-linecap="round"/>
               </svg>
@@ -1554,17 +1559,17 @@ function renderSingleCourse() {
             </div>
             ${bestPlayersPill}
           </div>
-          <h2 class="font-serif-club text-lg sm:text-xl font-semibold text-white leading-snug">
+          <h2 class="font-serif-club text-sm sm:text-xl font-semibold text-white leading-snug">
             ${bestDay.dayTitle} ${bestDay.dateShort} — ${bestDay.teeTimeLabel}
           </h2>
-          <p class="text-xs text-[#d4e2da]">
+          <p class="text-[11px] sm:text-xs text-[#d4e2da]">
             ${bestDay.temp}°C · ${bestDay.wind} km/u ${bestDay.windDir} · ${bestDay.prob}% regen · licht tot ${bestDay.lightUntil}
           </p>
         </div>
         <div class="shrink-0">
-          <div class="inline-flex flex-col items-center px-3.5 py-2 rounded-lg bg-white/10 border border-[#b89652]/50 text-white">
-            <span class="font-mono-score text-xl font-semibold leading-none">${formatWeatherGrade(bestDay.score)}</span>
-            <span class="text-[11px] font-medium text-[#e2c891] mt-1">${bMeta.label}</span>
+          <div class="inline-flex flex-col items-center px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg bg-white/10 border border-[#b89652]/50 text-white">
+            <span class="font-mono-score text-lg sm:text-xl font-semibold leading-none">${formatWeatherGrade(bestDay.score)}</span>
+            <span class="text-[10px] sm:text-[11px] font-medium text-[#e2c891] mt-0.5 sm:mt-1">${bMeta.label}</span>
           </div>
         </div>
       </div>
@@ -2494,6 +2499,13 @@ function setViewMode(mode, shouldScrollTab = false) {
   renderApp();
 }
 
+function updateMobileSettingsSummary() {
+  const el = $('mobileSettingsSummary');
+  if (!el) return;
+  const prefShort = ['Bikkel', 'Normaal', 'Mooiweer'][state.preference] || 'Normaal';
+  el.textContent = `${state.holes}h · ${prefShort}`;
+}
+
 function setHoles(holes) {
   state.holes = holes;
   const b9 = $('btn9Holes');
@@ -2502,6 +2514,7 @@ function setHoles(holes) {
     b9.setAttribute('aria-pressed', String(holes === 9));
     b18.setAttribute('aria-pressed', String(holes === 18));
   }
+  updateMobileSettingsSummary();
   recomputeAllAnalyses();
   renderApp();
 }
@@ -2514,6 +2527,7 @@ function setPreference(prefVal) {
   document.querySelectorAll('[data-pref]').forEach(btn => {
     btn.setAttribute('aria-pressed', String(parseInt(btn.dataset.pref, 10) === prefVal));
   });
+  updateMobileSettingsSummary();
   recomputeAllAnalyses();
   renderApp();
 }
@@ -2521,6 +2535,17 @@ function setPreference(prefVal) {
 function init() {
   loadCourses();
   renderCourseSelector();
+  updateMobileSettingsSummary();
+
+  $('btnToggleMobileSettings')?.addEventListener('click', () => {
+    const drawer = $('courseSettingsDrawer');
+    const btn = $('btnToggleMobileSettings');
+    if (!drawer || !btn) return;
+    const isNowOpen = drawer.classList.toggle('hidden') === false;
+    btn.setAttribute('aria-expanded', String(isNowOpen));
+    const icon = btn.querySelector('svg');
+    if (icon) icon.style.transform = isNowOpen ? 'rotate(180deg)' : '';
+  });
 
   $('courseSelect')?.addEventListener('change', (e) => {
     state.selectedCourseId = e.target.value;
@@ -2577,10 +2602,12 @@ function init() {
   $('btnRetry')?.addEventListener('click', fetchAllWeatherData);
 
   // Eigen baan modal
-  $('btnOpenAddCourse')?.addEventListener('click', () => {
+  const openAddCourseModal = () => {
     $('addCourseModal')?.classList.remove('hidden');
     $('addCourseModal')?.classList.add('flex');
-  });
+  };
+  $('btnOpenAddCourse')?.addEventListener('click', openAddCourseModal);
+  $('btnOpenAddCourseMobile')?.addEventListener('click', openAddCourseModal);
   const closeAdd = () => {
     $('addCourseModal')?.classList.add('hidden');
     $('addCourseModal')?.classList.remove('flex');
